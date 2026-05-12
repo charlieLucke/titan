@@ -1,0 +1,164 @@
+{
+  "version": "2.0",
+  "description": "Epic 5A Validation – 20 stratifizierte Eval-Cases",
+  "categories": {
+    "A": "Single-Domain mit --domain Filter",
+    "B": "Single-Domain ohne --domain Filter",
+    "C": "Cross-Domain ohne Filter",
+    "D": "Edge-Cases"
+  },
+  "cases": [
+    {
+      "id": "A1", "category": "A",
+      "query": "Was ist der Stop-Loss-Wert für 2026?",
+      "domain": "trading",
+      "expected_keyword": "3,5",
+      "expected_source": "trading_log.pdf"
+    },
+    {
+      "id": "A2", "category": "A",
+      "query": "Wann signalisiert der RSI überverkauft?",
+      "domain": "trading",
+      "expected_keyword": "30",
+      "expected_source": "trading_log.pdf"
+    },
+    {
+      "id": "A3", "category": "A",
+      "query": "Welche Win-Rate hatte Krypto im Q1 2026?",
+      "domain": "trading",
+      "expected_keyword": "62",
+      "expected_source": "trading_log.pdf"
+    },
+    {
+      "id": "A4", "category": "A",
+      "query": "Welcher Port ist für gRPC reserviert?",
+      "domain": "architektur",
+      "expected_keyword": "6334",
+      "expected_source": "system_architektur.pdf"
+    },
+    {
+      "id": "A5", "category": "A",
+      "query": "Welche GPU nutzt System B?",
+      "domain": "architektur",
+      "expected_keyword": "4070",
+      "expected_source": "system_architektur.pdf"
+    },
+    {
+      "id": "B1", "category": "B",
+      "query": "Was ist der Stop-Loss-Wert für 2026?",
+      "domain": null,
+      "expected_keyword": "3,5",
+      "expected_source": "trading_log.pdf"
+    },
+    {
+      "id": "B2", "category": "B",
+      "query": "Wann signalisiert der RSI überverkauft?",
+      "domain": null,
+      "expected_keyword": "30",
+      "expected_source": "trading_log.pdf"
+    },
+    {
+      "id": "B3", "category": "B",
+      "query": "Welche Win-Rate hatte Krypto im Q1 2026?",
+      "domain": null,
+      "expected_keyword": "62",
+      "expected_source": "trading_log.pdf"
+    },
+    {
+      "id": "B4", "category": "B",
+      "query": "Welcher Port ist für gRPC reserviert?",
+      "domain": null,
+      "expected_keyword": "6334",
+      "expected_source": "system_architektur.pdf"
+    },
+    {
+      "id": "B5", "category": "B",
+      "query": "Welche GPU nutzt System B?",
+      "domain": null,
+      "expected_keyword": "4070",
+      "expected_source": "system_architektur.pdf"
+    },
+    {
+      "id": "C1", "category": "C",
+      "query": "Welche Hardware und welcher Stop-Loss sind für das System konfiguriert?",
+      "domain": null,
+      "expected_keyword": "3,5",
+      "expected_secondary_keyword": "4070",
+      "expected_source": "both"
+    },
+    {
+      "id": "C2", "category": "C",
+      "query": "Welche Ports und welche Indikatoren werden genutzt?",
+      "domain": null,
+      "expected_keyword": "6334",
+      "expected_secondary_keyword": "RSI",
+      "expected_source": "both"
+    },
+    {
+      "id": "C3", "category": "C",
+      "query": "Wie viel RAM hat System B und welche Win-Rate hat der S&P 500 ETF?",
+      "domain": null,
+      "expected_keyword": "64",
+      "expected_secondary_keyword": "71",
+      "expected_source": "both"
+    },
+    {
+      "id": "C4", "category": "C",
+      "query": "Vergleiche die Architektur-Optimierungen mit den Trading-Risiken.",
+      "domain": null,
+      "expected_keyword": "HNSW",
+      "expected_secondary_keyword": "Stop-Loss",
+      "expected_source": "both"
+    },
+    {
+      "id": "C5", "category": "C",
+      "query": "Welche Rolle haben gRPC und Bollinger Bänder im System?",
+      "domain": null,
+      "expected_keyword": "gRPC",
+      "expected_secondary_keyword": "Bollinger",
+      "expected_source": "both"
+    },
+    {
+      "id": "D1", "category": "D",
+      "query": "RSI",
+      "domain": null,
+      "expected_keyword": "RSI",
+      "expected_source": "trading_log.pdf",
+      "test_type": "single_word_query"
+    },
+    {
+      "id": "D2", "category": "D",
+      "query": "Was bedeutet m=0 im HNSW-Kontext?",
+      "domain": null,
+      "expected_keyword": "HNSW",
+      "expected_source": "system_architektur.pdf",
+      "test_type": "special_chars"
+    },
+    {
+      "id": "D3", "category": "D",
+      "query": "Erkläre mir im Detail, wie das Trading-System die Kombination aus technischen Indikatoren wie dem RSI und den Bollinger Bändern zusammen mit den festgelegten Stop-Loss-Grenzen und den historischen Performance-Daten aus dem ersten Quartal 2026 nutzt, um automatisierte Handelsentscheidungen zu treffen, und wie dies mit der zugrunde liegenden Systemarchitektur zusammenhängt, insbesondere bezüglich der GPU-Beschleunigung und der Netzwerkprotokolle für die Datenübertragung zwischen den beiden Systemen.",
+      "domain": null,
+      "expected_keyword": "RSI",
+      "expected_source": "both",
+      "test_type": "long_query"
+    },
+    {
+      "id": "D4", "category": "D",
+      "query": "Welcher Mond ist am hellsten?",
+      "domain": null,
+      "expected_keyword": null,
+      "expected_source": null,
+      "test_type": "out_of_corpus",
+      "expect_no_answer": true
+    },
+    {
+      "id": "D5", "category": "D",
+      "query": "Welche Verschlüsselung nutzt das System?",
+      "domain": null,
+      "expected_keyword": null,
+      "expected_source": null,
+      "test_type": "near_miss_ood",
+      "expect_no_answer": true
+    }
+  ]
+}

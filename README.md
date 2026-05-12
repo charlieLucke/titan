@@ -1,6 +1,6 @@
-# PROJECT_NAME
+# titan
 
-PROJECT_DESCRIPTION
+Local high-performance RAG system on a single workstation
 
 ## Setup
 
@@ -26,7 +26,7 @@ make help       # list all available commands
 ## Project Structure
 
 ```
-src/PROJECT_NAME/    Source code
+src/titan/    Source code
 tests/               Pytest tests (mirrors src/ layout)
 docs/ai/             AI agent context and plans
 .github/workflows/   CI configuration

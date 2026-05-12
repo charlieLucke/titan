@@ -21,10 +21,10 @@ If any of these files are missing or empty, ask the user before guessing.
 
 ## First-Time Setup
 
-If `docs/ai/` exists but the stub files are still empty (no real CONTEXT, no plans, README still says PROJECT_NAME), this is a fresh template. Before doing any task:
+If `docs/ai/` exists but the stub files are still empty (no real CONTEXT, no plans, README still says titan), this is a fresh template. Before doing any task:
 
 1. Ask the user for project name, description, and what they're building.
-2. Offer to run the renaming step (replace `PROJECT_NAME` placeholders) or provide the commands.
+2. Offer to run the renaming step (replace `titan` placeholders) or provide the commands.
 3. Ask the user to fill in `docs/ai/CONTEXT.md` (or interview them and write it).
 4. Only then proceed with actual work.
 

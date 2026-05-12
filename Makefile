@@ -9,7 +9,7 @@ install:  ## Install dependencies and pre-commit hooks
 
 dev:  ## Start development server (configure per project)
 	@echo "Edit Makefile: define your dev command here"
-	@echo "Example: uv run uvicorn PROJECT_NAME.main:app --reload"
+	@echo "Example: uv run uvicorn titan.main:app --reload"
 
 test:  ## Run tests with coverage
 	uv run pytest
@@ -37,4 +37,4 @@ clean:  ## Remove caches and build artifacts
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
 
 run:  ## Run the main module
-	uv run python -m PROJECT_NAME
+	uv run python -m titan
