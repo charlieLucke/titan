@@ -59,3 +59,22 @@ Mit `titan` als Package-Name ist die zusätzliche Verschachtelung reiner Overhea
 knallen. Das ist kein echtes Typ-Problem, sondern fehlende Third-Party-Stubs.
 **Consequences:** Diese Module sind von der Typ-Prüfung ausgenommen — ein akzeptabler Kompromiss
 solange keine Community-Stubs verfügbar sind.
+
+## 2026-05-12: ColBERT-Vektordimension 1024 (FlagEmbedding ≥ 1.3)
+**Decision:** Qdrant-Collection wird mit `colbert.size=1024` angelegt.
+**Reasoning:** FlagEmbedding hat ab Version 1.3 die ColBERT-Ausgabedimension von 128 auf 1024
+geändert. Die Collection muss exakt zur installierten Library-Version passen — falscher Wert führt
+zu Upsert-Fehlern oder unbrauchbaren Retrieval-Ergebnissen ohne offensichtliche Fehlermeldung.
+**Alternatives considered:** 128 (Vorversion) — verworfen, da ab FE 1.3 faktisch falsch.
+**Consequences:** `flagembedding>=1.3` ist implizite Mindestanforderung (pyproject.toml deklariert
+`>=1.4.0`). Bei FlagEmbedding-Upgrade: Release Notes auf ColBERT-Dim-Änderungen prüfen. Bei
+Downgrade unter 1.3: Collection mit `init_col.py --recreate` neu anlegen mit `colbert.size=128`.
+
+## 2026-05-12: GPU_LOCK_PATH Default auf /tmp/bge_m3.lock geändert
+**Decision:** GPU-Lock-Datei liegt unter `/tmp/bge_m3.lock` (war `/tmp/rag_gpu.lock` im alten
+RAG_System-Repo).
+**Reasoning:** Der neue Lock-Pfad reflektiert den neuen Package-Namen und vermeidet Kollisionen
+mit noch laufenden Prozessen aus dem alten RAG_System-Setup.
+**Consequences:** Wer vom alten RAG_System migriert: einmalig `rm -f /tmp/rag_gpu.lock` ausführen,
+damit kein veralteter Lock-File einen Prozess-Start blockiert. Der neue Pfad kann via `.env`
+überschrieben werden (`GPU_LOCK_PATH=/tmp/bge_m3.lock`).

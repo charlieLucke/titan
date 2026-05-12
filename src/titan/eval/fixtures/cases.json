@@ -1,6 +1,6 @@
 {
   "version": "2.0",
-  "description": "Epic 5A Validation – 20 stratifizierte Eval-Cases",
+  "description": "Stratifizierte Retrieval-Eval-Cases (20 Cases, 4 Kategorien)",
   "categories": {
     "A": "Single-Domain mit --domain Filter",
     "B": "Single-Domain ohne --domain Filter",
