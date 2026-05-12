@@ -717,6 +717,117 @@ def upsert_to_qdrant(client: Any, chunks: list[dict[str, Any]], domain: str) -> 
 # ════════════════════════════════════════════════════════════════════════════
 
 
+def read_markdown(file_path: Path) -> tuple[str, dict[str, Any]]:
+    """Liest eine Markdown-Datei mit YAML-Frontmatter.
+
+    Args:
+        file_path: Absoluter Pfad zur .md-Datei.
+
+    Returns:
+        Tuple (content, metadata):
+            content  – Markdown-Inhalt ohne Frontmatter.
+            metadata – Frontmatter-Dict. Enthält ``_skip: True`` wenn
+                       ``indexed: false`` gesetzt ist. Domain-Wert wird
+                       mit sanitize() bereinigt (Prompt-Injection-Schutz).
+
+    Raises:
+        ValueError: Wenn domain fehlt oder leer ist (und indexed nicht false).
+        FileNotFoundError: Wenn die Datei nicht existiert.
+    """
+    import frontmatter  # python-frontmatter
+
+    from titan.utils import sanitize
+
+    post = frontmatter.load(str(file_path))
+    meta: dict[str, Any] = dict(post.metadata)
+    content: str = post.content
+
+    # indexed:false → Sentinel zurückgeben
+    if meta.get("indexed") is False or str(meta.get("indexed", "")).lower() == "false":
+        return content, {**meta, "_skip": True}
+
+    # Domain ist Pflicht für indexierbare Notes
+    raw_domain = meta.get("domain", "")
+    if not raw_domain or not str(raw_domain).strip():
+        raise ValueError(
+            f"Frontmatter-Feld 'domain' fehlt oder ist leer in: {file_path}. "
+            "Setze 'indexed: false' um die Note zu überspringen."
+        )
+
+    meta["domain"] = sanitize(str(raw_domain).strip())
+    return content, meta
+
+
+def late_chunk_and_embed(content: str, model: Any) -> list[dict[str, Any]]:
+    """Kombiniert chunk_markdown + late_chunk_embed für Markdown-Content.
+
+    Convenience-Wrapper für den Service-Pfad. Das Modell wird übergeben
+    (kein eigenes Loading/Lock).
+
+    Args:
+        content: Markdown-Inhalt (ohne Frontmatter).
+        model: Vorgeladene BGEM3FlagModel-Instanz.
+
+    Returns:
+        Chunks mit dense/sparse/colbert-Vektoren.
+    """
+    # Für Markdown ohne echten source-Pfad nutzen wir einen Placeholder.
+    # Der Caller setzt source_path im Payload beim Upsert.
+    placeholder_path = Path("<service-ingest>")
+    raw_chunks = chunk_markdown(content, placeholder_path)
+    return late_chunk_embed(model, raw_chunks)
+
+
+def make_point(
+    chunk: dict[str, Any],
+    file_path: Path,
+    domain: str,
+    run_id: str,
+) -> Any:
+    """Erstellt ein Qdrant-PointStruct aus einem embedded Chunk.
+
+    Setzt source_path, domain und run_id im Payload (für Upsert-before-Delete).
+
+    Args:
+        chunk:     Chunk-Dict mit dense/sparse/colbert-Vektoren.
+        file_path: Absoluter Pfad der ingestierten Datei (source_path im Payload).
+        domain:    Domain-Label.
+        run_id:    UUID dieses Ingest-Runs (für Upsert-before-Delete-Pattern).
+
+    Returns:
+        PointStruct bereit für qdrant_client.upsert().
+    """
+    from qdrant_client.models import PointStruct, SparseVector
+
+    from titan.utils import stable_uuid
+
+    sparse_raw: dict[str, Any] = chunk["sparse"]
+    sparse_vec = SparseVector(
+        indices=[int(float(k)) for k in sparse_raw],
+        values=[float(v) for v in sparse_raw.values()],
+    )
+
+    source_str = str(file_path)
+    return PointStruct(
+        id=stable_uuid(source_str, chunk.get("chunk_id", 0)),
+        vector={
+            "dense": chunk["dense"],
+            "sparse": sparse_vec,
+            "colbert": chunk["colbert"],
+        },
+        payload={
+            "text": chunk.get("text", ""),
+            "source": source_str,
+            "source_path": source_str,  # Alias für Service-Queries
+            "chunk_id": chunk.get("chunk_id", 0),
+            "chunk_offset": chunk.get("chunk_id", 0),  # Alias für Service-Schema
+            "header": chunk.get("header", ""),
+            "domain": domain,
+            "run_id": run_id,
+        },
+    )
+
+
 def collect_pdfs(input_path: Path) -> list[Path]:
     """Sammelt PDF-Dateipfade aus einer Datei oder einem Verzeichnis.
 

@@ -6,11 +6,15 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "docling>=2.93.0",
+    "fastapi>=0.136.1",
     "flagembedding>=1.4.0",
+    "httpx>=0.28.1",
     "python-dotenv>=1.2.2",
+    "python-frontmatter>=1.1.0",
     "qdrant-client>=1.18.0",
     "requests>=2.34.0",
     "torch>=2.11.0",
+    "uvicorn[standard]>=0.46.0",
 ]
 
 [dependency-groups]
@@ -85,6 +89,16 @@ module = [
     "docling.*",
     "docling_core.*",
 ]
+ignore_missing_imports = true
+
+# FastAPI decorators are not fully typed for mypy strict mode
+[[tool.mypy.overrides]]
+module = "titan.service.routes"
+disable_error_code = ["untyped-decorator", "no-any-return"]
+
+# python-frontmatter has no type stubs
+[[tool.mypy.overrides]]
+module = "frontmatter"
 ignore_missing_imports = true
 
 # ---------- Pytest ----------

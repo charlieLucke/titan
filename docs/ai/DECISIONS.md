@@ -78,3 +78,43 @@ mit noch laufenden Prozessen aus dem alten RAG_System-Setup.
 **Consequences:** Wer vom alten RAG_System migriert: einmalig `rm -f /tmp/rag_gpu.lock` ausführen,
 damit kein veralteter Lock-File einen Prozess-Start blockiert. Der neue Pfad kann via `.env`
 überschrieben werden (`GPU_LOCK_PATH=/tmp/bge_m3.lock`).
+
+---
+
+## 2026-05-12: run_id-Payload-Konvention für Upsert-before-Delete
+**Decision:** Jeder Ingest-Run setzt eine UUID (`run_id`) im Chunk-Payload.
+Beim Re-Ingest: neue Chunks mit neuem `run_id` einfügen, dann alte Chunks mit
+anderem `run_id` für dieselbe `source_path` löschen.
+**Reasoning:** Verhindert Downtime-Fenster: Solange Schritt 2 (Upsert) läuft,
+sind die alten Chunks noch durchsuchbar. Wenn Schritt 2 crasht, bleibt der alte
+Stand erhalten. Doppelte Chunks (alter + neuer Run) sind harmlos — RRF gewichtet
+sie gleichwertig und der nächste Lauf bereinigt.
+**Alternatives considered:** Delete-before-Insert (führt zu Lücken während Re-Indexierung).
+**Consequences:** `run_id` ist Pflicht-Payload-Feld für alle Ingest-Aufrufe via Service.
+CLI-Ingest (`python -m titan.ingest`) nutzt diese Konvention noch nicht — das ist akzeptabel
+da der CLI-Pfad typischerweise für Erst-Ingest genutzt wird.
+
+## 2026-05-12: indexed:false Semantik — Service entscheidet, Client trusts
+**Decision:** Frontmatter-Feld `indexed: false` wird ausschließlich vom Service
+ausgewertet. Der Watcher (brain-mcp Phase 2) sendet den Pfad ohne Frontmatter-Auswertung.
+**Reasoning:** Einzige Stelle die die Semantik kennt → kein Sync-Problem wenn sich
+die Semantik ändert.
+**Consequences:** `POST /ingest/file` bei `indexed:false`: löscht existierende Chunks,
+gibt `skipped_reason: "indexed:false"` zurück, erstellt keine neuen Chunks.
+
+## 2026-05-12: Cache-Invalidierung aggressiv (Domain-granular)
+**Decision:** Bei Re-Ingest einer Note werden ALLE Cache-Einträge ihrer Domain geleert.
+**Reasoning:** Einfachste korrekte Implementierung. Cache-Hit für "alten" Stand vermeiden
+ohne Chunk→Cache-Dependency-Tracking.
+**Alternatives considered:** Feingranulare Invalidierung nur für Einträge die die geänderte
+Note enthielten — braucht Cache→Chunk-Tracking das Epic 5B nicht implementiert.
+**Consequences:** Bei häufigen Edits in einer Domain kann die Cache-Hit-Rate sinken.
+Wenn das messbar problematisch wird: feineres Tracking nachrüsten.
+
+## 2026-05-12: source_path + source als Payload-Aliases
+**Decision:** Neue Ingest-Uploads via Service setzen sowohl `source_path` als auch
+`source` im Qdrant-Payload. Alte CLI-Ingests haben nur `source`.
+**Reasoning:** Rückwärtskompatibilität: Bestehende Chunks im Index bleiben nutzbar.
+Service-Schema (`Chunk.source_path`) ist der neue Standard.
+**Consequences:** Search-Ergebnisse liefern beide Keys. Routes-Code nutzt `source_path`;
+falls leer, ist die Note per altem CLI-Pfad ingested.

@@ -600,8 +600,11 @@ def hybrid_search_with_rerank(
             "score": round(hit.score, 6),
             "id": str(hit.id),
             "source": hit.payload.get("source", ""),
+            "source_path": hit.payload.get("source", ""),  # Service-Alias
             "header": hit.payload.get("header", ""),
             "text": hit.payload.get("text", ""),
+            "domain": hit.payload.get("domain", ""),
+            "chunk_offset": hit.payload.get("chunk_id", 0),
         }
         for rank, hit in enumerate(hits)
     ]
@@ -638,6 +641,106 @@ def print_results(
 # ════════════════════════════════════════════════════════════════════════════
 # Einstiegspunkt
 # ════════════════════════════════════════════════════════════════════════════
+
+
+def search(
+    query: str,
+    domain: str | None = None,
+    top_k: int = 10,
+    prefetch_limit: int = 100,
+    use_decompose: bool = True,
+    use_cache: bool = True,
+    model: Any | None = None,
+    qdrant_client: Any | None = None,
+) -> dict[str, Any]:
+    """Führt eine vollständige Hybrid-Suche durch (CLI- und Service-Pfad).
+
+    Wenn ``model`` oder ``qdrant_client`` None sind, werden sie intern geladen
+    (CLI-Pfad inkl. GPU-Lock). Werden sie übergeben, übernimmt der Caller die
+    Verwaltung des GPU-Locks und des Modells (Service-Pfad).
+
+    Args:
+        query: Suchanfrage.
+        domain: Optionaler Domain-Filter.
+        top_k: Maximale Anzahl Ergebnis-Chunks.
+        prefetch_limit: Vorfilter-Kandidaten für ColBERT-Reranking.
+        use_decompose: Query-Decomposition via Phi-4 aktivieren.
+        use_cache: Epic-5B Semantic Cache nutzen.
+        model: Optional vorgeladene BGEM3FlagModel-Instanz (Service-Pfad).
+        qdrant_client: Optional vorgeladener QdrantClient (Service-Pfad).
+
+    Returns:
+        Dict mit keys:
+            chunks:      list[dict] – finales Ranking
+            sub_queries: list[str] – generierte Sub-Queries
+            cache_hit:   bool – True wenn mind. eine Sub-Query aus Cache kam
+    """
+    _own_lock: Any = None
+    _own_model = model is None
+    _own_client = qdrant_client is None
+
+    # CLI-Pfad: Lock und Ressourcen selbst verwalten
+    if _own_lock is None and _own_model:
+        try:
+            _own_lock = acquire_gpu_lock()
+        except RuntimeError as e:
+            raise RuntimeError(f"GPU-Lock nicht erreichbar: {e}") from e
+
+    if _own_model:
+        model = load_bge_m3_model()
+    if _own_client:
+        qdrant_client = build_qdrant_client()
+
+    # Query-Decomposition (VOR GPU-Operationen, keep_alive=0 → kein VRAM-Konflikt)
+    if use_decompose:
+        sub_queries = decompose_query(query)
+        if query not in sub_queries:
+            sub_queries.append(query)
+    else:
+        sub_queries = [query]
+
+    if use_cache and CACHE_ENABLED:
+        bootstrap_cache_collection(qdrant_client)
+
+    rrf_candidates = top_k * max(len(sub_queries), 3)
+    ranked_lists: list[list[dict[str, Any]]] = []
+    cache_hit = False
+
+    for sq in sub_queries:
+        vecs = embed_query(model, sq)
+
+        if use_cache and CACHE_ENABLED:
+            cached = cache_lookup(qdrant_client, sq, vecs["dense"], domain)
+            if cached is not None and cached:
+                ranked_lists.append(cached)
+                cache_hit = True
+                continue
+
+        results = hybrid_search_with_rerank(
+            qdrant_client,
+            vecs,
+            prefetch_limit=prefetch_limit,
+            final_top_k=rrf_candidates,
+            domain=domain,
+        )
+
+        if use_cache and CACHE_ENABLED and results:
+            cache_write(qdrant_client, sq, vecs["dense"], domain, results)
+
+        ranked_lists.append(results)
+
+    if not ranked_lists:
+        final: list[dict[str, Any]] = []
+    elif len(ranked_lists) > 1:
+        final = rrf_fusion(ranked_lists)[:top_k]
+    else:
+        final = ranked_lists[0][:top_k]
+
+    return {
+        "chunks": final,
+        "sub_queries": sub_queries,
+        "cache_hit": cache_hit,
+    }
 
 
 def main() -> None:

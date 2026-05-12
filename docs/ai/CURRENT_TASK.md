@@ -4,35 +4,40 @@
 
 ## Goal
 
-Phase 0b: Big-Bang-Migration des Codes aus `~/projects/RAG_System/` in das neue
-`~/projects/titan/`-Repo. Kein neues Feature, kein Service-Layer — nur sauberer Port.
+Phase 1: Service-Layer. FastAPI-Service mit BGE-M3 als Singleton, alle Endpoints,
+systemd-Unit, Integration-Tests.
 
-Plan: `docs/ai/plans/2026-05-12_phase-0b-migration.md`
+Plan: `docs/ai/plans/plan_titan_brain_v2.md`
+Branch: `feat/service-layer`
 
 ## Sub-steps
 
-- [x] Plan nach `titan/docs/ai/plans/` kopiert
-- [x] CONTEXT.md, CURRENT_TASK.md, DECISIONS.md befüllt
-- [x] M0: Dependencies + `.env.example` + mypy-Overrides
-- [x] M1: `utils.py` portieren + Smoke-Tests
-- [x] M4: `generate.py` portieren
-- [x] M3: `search.py` portieren
-- [x] M5: `evaluate.py` portieren
-- [x] M2: `ingest.py` portieren + Epic-5A-Removal
-- [x] M6: `eval/ab_eval.py` + M7: `tools/init_col.py` + M8: Fixtures
-- [x] M9: Audit + `make check` grün (ruff + mypy clean, 11/11 tests pass)
+- [x] Branch `feat/service-layer` angelegt
+- [x] A0: `_vram_probe.py` – VRAM-Probe-Skript
+- [x] A1: `service/app.py` + `service/state.py` – FastAPI Lifespan, BGE-M3 Singleton,
+       GPU-Lock, ColBERT-Dim-Check, Domain-Counter-Init; `main.py` Service-Dispatch
+- [x] A2: `service/schemas.py` – alle Pydantic-Schemas; `routes.py` – `GET /health`
+- [x] A3: `search.py` – `search()` Funktion mit injectablem model + qdrant_client
+- [x] A4: `routes.py` – `POST /search`
+- [x] A5: `ingest.py` – `read_markdown()` + `late_chunk_and_embed()` + `make_point()`
+- [x] A6: `routes.py` – `POST /ingest/file` (Upsert-before-Delete mit run_id)
+- [x] A7: `routes.py` – `GET /domains`
+- [x] A8: `routes.py` – `POST /find_related`
+- [x] A9: `routes.py` – `DELETE /chunks`
+- [x] A10: `routes.py` – `_invalidate_cache_for_domain()` bei Re-Ingest
+- [ ] A11: systemd-Service-Datei
+- [ ] A12: Integration-Tests (`tests/integration/test_service.py`)
+- [ ] A13: Audit-Runde (Opus)
 
 ## Status
 
-**Phase 0b abgeschlossen.** Alle Module portiert, Epic 5A vollständig entfernt,
-`ruff check` + `mypy src/` grün über alle 12 Quelldateien, 11 Tests bestanden.
-
-Nächster Schritt: E2E-Test manuell ausführen (Qdrant + Ollama müssen laufen).
+**A0–A10 implementiert.** ruff + mypy grün über alle 8 Quelldateien.
+Nächster Schritt: A11 systemd + A12 Integration-Tests.
 
 ## Notes
 
-- Epic-5A-Code (contextual summaries) komplett entfernt — `~/projects/RAG_System/` bleibt Referenz
-- `INGEST_BASE_DIR` Default: `/mnt/f/data/titan-input` (war `/mnt/ai_daten`)
-- `MultivectorComparator` heißt in qdrant-client `MultiVectorComparator` (capital V)
-- FlagEmbedding-Imports sind lazy (innerhalb von Funktionen) → `flagembedding.*` mypy-Override zeigt
-  beim Check einzelner Dateien als "unused" — das ist erwartet, kein echtes Problem
+- `source_path` und `source` sind jetzt beide im Payload (Alias) — rückwärtskompatibel
+- `run_id` im Payload ist neue Konvention (→ DECISIONS.md)
+- python-frontmatter als neue Dependency für read_markdown
+- pre-commit mypy-Hook bekommt pydantic/fastapi/torch als additional_dependencies
+- `frontmatter`-Modul braucht mypy `ignore_missing_imports`
