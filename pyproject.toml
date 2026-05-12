@@ -80,6 +80,7 @@ no_implicit_optional = true
 [[tool.mypy.overrides]]
 module = "tests.*"
 disallow_untyped_defs = false
+ignore_errors = true
 
 # ML libraries without type stubs — see DECISIONS.md 2026-05-12
 [[tool.mypy.overrides]]

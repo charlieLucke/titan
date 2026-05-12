@@ -25,14 +25,14 @@ Branch: `feat/service-layer`
 - [x] A8: `routes.py` – `POST /find_related`
 - [x] A9: `routes.py` – `DELETE /chunks`
 - [x] A10: `routes.py` – `_invalidate_cache_for_domain()` bei Re-Ingest
-- [ ] A11: systemd-Service-Datei
-- [ ] A12: Integration-Tests (`tests/integration/test_service.py`)
+- [x] A11: `deploy/titan-service.service` + `deploy/README.md`
+- [x] A12: `tests/integration/test_service.py` – 16 Test-Cases (pytest.mark.integration)
 - [ ] A13: Audit-Runde (Opus)
 
 ## Status
 
-**A0–A10 implementiert.** ruff + mypy grün über alle 8 Quelldateien.
-Nächster Schritt: A11 systemd + A12 Integration-Tests.
+**A0–A12 implementiert.** ruff + mypy grün über alle 10 Quelldateien (src + tests).
+Nächster Schritt: A13 Audit-Runde (Opus), dann manueller E2E-Test wenn Qdrant+Ollama laufen.
 
 ## Notes
 

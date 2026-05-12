@@ -1,0 +1,16 @@
+[Unit]
+Description=Titan RAG Service (BGE-M3 + FastAPI :8765)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/charl/projects/titan
+ExecStart=/home/charl/projects/titan/.venv/bin/python -m titan service --port 8765
+Restart=on-failure
+RestartSec=5
+Environment="PYTHONUNBUFFERED=1"
+StandardOutput=append:/home/charl/projects/titan/logs/service.log
+StandardError=append:/home/charl/projects/titan/logs/service.err.log
+
+[Install]
+WantedBy=default.target
