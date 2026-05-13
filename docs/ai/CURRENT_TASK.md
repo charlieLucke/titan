@@ -4,40 +4,30 @@
 
 ## Goal
 
-Phase 1: Service-Layer. FastAPI-Service mit BGE-M3 als Singleton, alle Endpoints,
-systemd-Unit, Integration-Tests.
+Phase 2 (brain-mcp) abgeschlossen. Nächster Schritt: manuelle Aktivierung + B11 Audit.
 
 Plan: `docs/ai/plans/plan_titan_brain_v2.md`
-Branch: `feat/service-layer`
 
-## Sub-steps
+## Phase 1 (titan-Repo) — abgeschlossen
 
-- [x] Branch `feat/service-layer` angelegt
-- [x] A0: `_vram_probe.py` – VRAM-Probe-Skript
-- [x] A1: `service/app.py` + `service/state.py` – FastAPI Lifespan, BGE-M3 Singleton,
-       GPU-Lock, ColBERT-Dim-Check, Domain-Counter-Init; `main.py` Service-Dispatch
-- [x] A2: `service/schemas.py` – alle Pydantic-Schemas; `routes.py` – `GET /health`
-- [x] A3: `search.py` – `search()` Funktion mit injectablem model + qdrant_client
-- [x] A4: `routes.py` – `POST /search`
-- [x] A5: `ingest.py` – `read_markdown()` + `late_chunk_and_embed()` + `make_point()`
-- [x] A6: `routes.py` – `POST /ingest/file` (Upsert-before-Delete mit run_id)
-- [x] A7: `routes.py` – `GET /domains`
-- [x] A8: `routes.py` – `POST /find_related`
-- [x] A9: `routes.py` – `DELETE /chunks`
-- [x] A10: `routes.py` – `_invalidate_cache_for_domain()` bei Re-Ingest
-- [x] A11: `deploy/titan-service.service` + `deploy/README.md`
-- [x] A12: `tests/integration/test_service.py` – 16 Test-Cases (pytest.mark.integration)
-- [ ] A13: Audit-Runde (Opus)
+- [x] A0–A13: Service-Layer vollständig, auditiert (audit_a13.md: ✅ bestanden)
+
+## Phase 2 (brain-mcp-Repo) — B0–B10 abgeschlossen
+
+- [x] B0: Repo `brain-mcp` aus Template, deps
+- [x] B1–B5: TitanClient, FastMCP, 4 Tools
+- [x] B6–B7: VaultWatcher + Reconnect-Logik
+- [x] B8–B9: systemd + Claude Desktop Anleitung
+- [x] B10: Tests grün (33 passed, 3 E2E skipped ohne live Titan)
+- [x] **B11: Audit-Runde (Opus)** — abgeschlossen (inkl. Fix für E2E-Tests)
+- [ ] Manuelle Aktivierung: systemd + Claude Desktop Config
+- [ ] Manueller E2E-Test mit echtem Titan-Service
 
 ## Status
 
-**A0–A12 implementiert.** ruff + mypy grün über alle 10 Quelldateien (src + tests).
-Nächster Schritt: A13 Audit-Runde (Opus), dann manueller E2E-Test wenn Qdrant+Ollama laufen.
+Warten auf manuelle Aktivierungsschritte.
 
 ## Notes
 
-- `source_path` und `source` sind jetzt beide im Payload (Alias) — rückwärtskompatibel
-- `run_id` im Payload ist neue Konvention (→ DECISIONS.md)
-- python-frontmatter als neue Dependency für read_markdown
-- pre-commit mypy-Hook bekommt pydantic/fastapi/torch als additional_dependencies
-- `frontmatter`-Modul braucht mypy `ignore_missing_imports`
+- brain-mcp: `~/projects/brain-mcp/`
+- Aktivierung: `~/projects/brain-mcp/deploy/README.md`

@@ -717,7 +717,7 @@ systemctl --user status titan-service
 
 ```bash
 cd ~/projects
-gh repo create brain-mcp --template charlie-vincent/python-template --private --clone
+gh repo create brain-mcp --template charlievincentlucke-afk/python-template --private --clone
 cd brain-mcp
 ./init-project.sh brain-mcp "MCP server and vault watcher that make my Obsidian notes searchable by Claude"
 uv add fastmcp watchdog httpx python-frontmatter pydantic-settings
