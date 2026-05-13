@@ -446,6 +446,31 @@ def cache_cleanup(client: Any, domain: str | None = None) -> None:
         log.warning("Cache-Cleanup fehlgeschlagen: %s", e)
 
 
+def invalidate_domain_cache(qdrant_client: Any, domain: str) -> None:
+    """Löscht alle Cache-Einträge für eine Domain (aggressiv, domain-granular).
+
+    Wird nach Re-Ingest einer Note aufgerufen, damit veraltete Cache-Treffer
+    für die betroffene Domain nicht mehr ausgespielt werden.
+
+    Lebt hier in titan.search (nicht in routes), damit die Funktion testbar
+    ist ohne FastAPI und ohne Mocking des ServiceState-Singletons.
+    """
+    if not CACHE_ENABLED or qdrant_client is None:
+        return
+    try:
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        qdrant_client.delete(
+            collection_name=CACHE_COLLECTION_NAME,
+            points_selector=Filter(
+                must=[FieldCondition(key="domain", match=MatchValue(value=domain))]
+            ),
+        )
+        log.info("Cache für Domain '%s' invalidiert.", domain)
+    except Exception as exc:
+        log.warning("Cache-Invalidierung für Domain '%s' fehlgeschlagen: %s", domain, exc)
+
+
 def print_cache_stats(client: Any) -> None:
     """Gibt Statistiken über den Semantic Cache aus."""
     try:

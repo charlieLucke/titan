@@ -111,6 +111,25 @@ Note enthielten — braucht Cache→Chunk-Tracking das Epic 5B nicht implementie
 **Consequences:** Bei häufigen Edits in einer Domain kann die Cache-Hit-Rate sinken.
 Wenn das messbar problematisch wird: feineres Tracking nachrüsten.
 
+## 2026-05-13: Cache-Invalidierung in titan.search, nicht in routes
+
+**Decision:** `invalidate_domain_cache(qdrant_client, domain)` lebt in `titan.search`,
+nicht in `titan.service.routes`.
+**Reasoning:** Audit T-MED-2: Die Funktion braucht nur `qdrant_client` und die globalen
+Cache-Konstanten (`CACHE_COLLECTION_NAME`, `CACHE_ENABLED`) — beides aus `search.py` zugreifbar.
+In `routes` war sie wegen des `state.qdrant_client` gelandet, aber das ist kein valides Argument:
+`search()` nimmt den Client auch als Parameter. Damit ist die Funktion ohne FastAPI testbar.
+**Consequences:** Routes importieren `invalidate_domain_cache` aus `titan.search`.
+
+## 2026-05-13: Service bindet nur auf 127.0.0.1 (kein Remote-Zugriff)
+
+**Decision:** uvicorn läuft auf `host="127.0.0.1"`, keine Konfigurierbarkeit nach außen.
+**Reasoning:** Der Service ist für Single-User-Betrieb auf dem lokalen Rechner konzipiert.
+Exposition auf öffentliche IPs würde Auth, Rate-Limit und TLS erfordern.
+Audit-Bewertung (Sicherheits-Tabelle): ✅ akzeptables Härtungsniveau für Single-User-Setup.
+**Consequences:** Wer Multi-User oder Remote benötigt: Reverse-Proxy mit Auth davor, dann
+`VAULT_ROOT` und alle Path-Checks überprüfen.
+
 ## 2026-05-12: source_path + source als Payload-Aliases
 **Decision:** Neue Ingest-Uploads via Service setzen sowohl `source_path` als auch
 `source` im Qdrant-Payload. Alte CLI-Ingests haben nur `source`.

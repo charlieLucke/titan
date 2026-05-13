@@ -101,6 +101,8 @@ def _validate_embedding_dimension(client: Any) -> None:
             f"Collection mit init_col.py --recreate neu anlegen."
         )
     log.info("ColBERT-Dimension OK: %dd", actual_dim)
+    # Cache for /health endpoint (avoids a GPU encode per health-check call).
+    state.colbert_dim = actual_dim
 
 
 def _init_domain_counts(client: Any) -> Counter[str]:

@@ -65,20 +65,11 @@ async def health() -> HealthResponse:
             qdrant_reachable = False
 
     vram_used_mb: int | None = None
-    colbert_dim: int | None = None
     if bge_loaded and state.bge_model is not None:
         with contextlib.suppress(Exception):
             vram_used_mb = int(torch.cuda.memory_allocated() / 1024 / 1024)
-        with contextlib.suppress(Exception):
-            with torch.no_grad():
-                out = state.bge_model.encode(
-                    ["health check"],
-                    return_dense=False,
-                    return_sparse=False,
-                    return_colbert_vecs=True,
-                    batch_size=1,
-                )
-            colbert_dim = len(out["colbert_vecs"][0][0])
+    # colbert_dim is measured once at startup and cached in state (avoids per-request encode).
+    colbert_dim: int | None = state.colbert_dim
 
     overall: Literal["ok", "degraded"] = "ok" if (bge_loaded and qdrant_reachable) else "degraded"
 
@@ -170,41 +161,12 @@ def _path_check(raw: str) -> Path:
     return p
 
 
-def _delete_chunks_for_path(file_path: Path) -> int:
-    """Löscht alle Chunks einer Datei aus Qdrant. Gibt Anzahl gelöschter Chunks zurück."""
-    if state.qdrant_client is None:
-        return 0
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    result = state.qdrant_client.delete(
-        collection_name=COLLECTION_NAME,
-        points_selector=Filter(
-            must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))]
-        ),
-    )
-    # Qdrant gibt UpdateResult zurück; operation_id ist kein Count.
-    # Für den genauen Count müsste man vorher zählen — wir approximieren mit scroll.
-    # Alternativ: vor dem Delete scroll count. Hier nutzen wir result.status.
-    _ = result  # ignoriert – Qdrant liefert keinen gelöschten-Count direkt
-    return 0  # wird durch Caller überschrieben wenn bekannt
-
-
 def _count_chunks_for_path(file_path: Path) -> int:
-    """Zählt aktuelle Chunks einer Datei via Scroll."""
+    """Zählt Chunks einer Datei in Qdrant."""
     if state.qdrant_client is None:
         return 0
     from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-    _, _ = state.qdrant_client.scroll(
-        collection_name=COLLECTION_NAME,
-        scroll_filter=Filter(
-            must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))]
-        ),
-        limit=1,
-        with_payload=False,
-        with_vectors=False,
-    )
-    # Qdrant scroll gibt keine Gesamtanzahl zurück. Wir nutzen count().
     count_result = state.qdrant_client.count(
         collection_name=COLLECTION_NAME,
         count_filter=Filter(
@@ -268,17 +230,16 @@ async def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
 
     new_chunks = late_chunk_and_embed(content, model=state.bge_model)
 
+    # Count BEFORE upsert so chunks_deleted reflects the true size of the previous version.
+    n_before = _count_chunks_for_path(file_path)
+
     from qdrant_client.models import PointStruct
 
     points: list[PointStruct] = [make_point(c, file_path, domain, run_id) for c in new_chunks]
     state.qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
 
-    # Alte Chunks derselben Datei mit anderem run_id löschen
+    # Delete old chunks (different run_id) for the same file.
     from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    n_old = _count_chunks_for_path(file_path)
-    # Subtrahiere neue Chunks vom Count (die sind bereits drin)
-    n_old_estimate = max(0, n_old - len(new_chunks))
 
     state.qdrant_client.delete(
         collection_name=COLLECTION_NAME,
@@ -289,17 +250,17 @@ async def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
     )
 
     # Domain-Counter aktualisieren (A10: Cache-Invalidierung folgt nach diesem Block)
-    state.domain_counts[domain] = (
-        state.domain_counts.get(domain, 0) - n_old_estimate + len(new_chunks)
-    )
+    state.domain_counts[domain] = state.domain_counts.get(domain, 0) - n_before + len(new_chunks)
 
     # A10: Cache für diese Domain invalidieren
-    _invalidate_cache_for_domain(domain)
+    from titan.search import invalidate_domain_cache
+
+    invalidate_domain_cache(state.qdrant_client, domain)
 
     return IngestResponse(
         file_path=str(file_path),
         domain=domain,
-        chunks_deleted=n_old_estimate,
+        chunks_deleted=n_before,
         chunks_created=len(new_chunks),
         skipped_reason=None,
         latency_ms=int((time.perf_counter() - t0) * 1000),
@@ -410,30 +371,3 @@ async def delete_chunks(source_path: str) -> DeleteChunksResponse:
         state.domain_counts[domain_to_update] = max(0, state.domain_counts[domain_to_update] - n)
 
     return DeleteChunksResponse(source_path=str(path), chunks_deleted=n)
-
-
-# ─── Cache-Invalidierung (A10) ───────────────────────────────────────────────
-
-
-def _invalidate_cache_for_domain(domain: str) -> None:
-    """Löscht alle Cache-Einträge für eine Domain (aggressiv, aber einfach).
-
-    Implementierungsort hier in titan.service.routes statt titan.search,
-    da die Cache-Collection-Konfiguration aus state.qdrant_client kommt.
-    """
-    from titan.search import CACHE_COLLECTION_NAME, CACHE_ENABLED
-
-    if not CACHE_ENABLED or state.qdrant_client is None:
-        return
-    try:
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-        state.qdrant_client.delete(
-            collection_name=CACHE_COLLECTION_NAME,
-            points_selector=Filter(
-                must=[FieldCondition(key="domain", match=MatchValue(value=domain))]
-            ),
-        )
-        log.info("Cache für Domain '%s' invalidiert.", domain)
-    except Exception as exc:
-        log.warning("Cache-Invalidierung für Domain '%s' fehlgeschlagen: %s", domain, exc)
