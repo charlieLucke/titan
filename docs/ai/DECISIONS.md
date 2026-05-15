@@ -137,3 +137,8 @@ Audit-Bewertung (Sicherheits-Tabelle): ✅ akzeptables Härtungsniveau für Sing
 Service-Schema (`Chunk.source_path`) ist der neue Standard.
 **Consequences:** Search-Ergebnisse liefern beide Keys. Routes-Code nutzt `source_path`;
 falls leer, ist die Note per altem CLI-Pfad ingested.
+
+## 2026-05-16: Setup-Annahme - WSL2 Mirrored Networking & Docker Desktop
+**Decision:** Das Setup setzt voraus, dass Docker Desktop (für Container) läuft, WSL2 Mirrored Networking aktiv ist und `QDRANT_HOST=localhost` konfiguriert ist.
+**Reasoning:** Undokumentierte Netzwerk-Setups führen nach einiger Zeit unweigerlich zu langwierigem Debugging der Qdrant-Verbindung. Da Titan auf den Qdrant-Container über `localhost` zugreift, muss in WSL2 Mirrored Networking zwingend aktiviert sein, damit das Port-Mapping greift.
+**Consequences:** Bei `ConnectError` zu Qdrant immer zuerst prüfen: Läuft Docker Desktop? Ist Mirrored Networking in `.wslconfig` aktiv?
