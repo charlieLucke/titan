@@ -34,12 +34,12 @@ sondern über den brain-mcp-Server.
 - Der installierte Claude-Desktop-Build hat keinen Developer Mode; lokale stdio-MCP-Server
   über `claude_desktop_config.json` werden nicht unterstützt (App löscht den
   `mcpServers`-Block wieder).
-- Stand: brain-mcp läuft jetzt zusätzlich als HTTP-Daemon (`127.0.0.1:9100`). Die
-  Anbindung an Claude über einen *Custom Connector* ist aber noch **offen**: Custom
-  Connectors verbindet Anthropic serverseitig aus der Cloud, der MCP-Endpoint muss also
-  öffentlich aus dem Internet erreichbar sein. Geplant ist `tailscale funnel` + eine
-  Auth-Schicht — bewusst vertagt. Details im brain-mcp-Repo: `docs/ai/DECISIONS.md` und
-  `docs/ai/HANDOFF.md` (jeweils 2026-05-16).
+- Stand: **umgesetzt.** brain-mcp läuft als HTTP-Daemon (`127.0.0.1:9100`) hinter
+  `tailscale funnel` (öffentlich), abgesichert per GitHub-OAuth-Proxy mit Login-
+  Allowlist. In Claude als Custom Connector `https://charliespc.taild04050.ts.net/mcp`
+  eingebunden; End-to-End verifiziert (`query_knowledge` liefert Vault-Treffer).
+  Details im brain-mcp-Repo: `docs/ai/DECISIONS.md` und `docs/ai/HANDOFF.md`
+  (jeweils 2026-05-16).
 - An titan selbst wurde dafür **nichts geändert**. titan-service bleibt auf
   `127.0.0.1:8765`; brain-mcp ruft es über `BRAIN_TITAN_URL` auf.
 - Dienst-Reihenfolge für ein funktionierendes System:
