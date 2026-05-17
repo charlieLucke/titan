@@ -15,6 +15,7 @@ die nach dem Test-Lauf automatisch gelöscht wird.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import textwrap
 import uuid
@@ -77,8 +78,12 @@ def qdrant_client() -> Generator[Any, None, None]:
 
     yield client
 
-    client.delete_collection(TEST_COLLECTION)
-    client.close()
+    # Teardown defensiv: ein transienter gRPC-Fehler beim Cleanup darf den
+    # Test-Lauf nicht rot färben.
+    with contextlib.suppress(Exception):
+        client.delete_collection(TEST_COLLECTION)
+    with contextlib.suppress(Exception):
+        client.close()
 
 
 @pytest.fixture(scope="module")
