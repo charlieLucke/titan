@@ -34,6 +34,7 @@ TEST_COLLECTION = f"titan_test_{uuid.uuid4().hex[:8]}"
 @pytest.fixture(scope="module")
 def qdrant_client() -> Generator[Any, None, None]:
     """Echter Qdrant-Client auf Test-Collection."""
+    from dotenv import load_dotenv
     from qdrant_client import QdrantClient
     from qdrant_client.models import (
         Distance,
@@ -42,27 +43,32 @@ def qdrant_client() -> Generator[Any, None, None]:
         SparseIndexParams,
         SparseVectorParams,
         VectorParams,
-        VectorsConfig,
     )
+
+    # .env laden, damit QDRANT_API_KEY verfügbar ist (Qdrant verlangt Auth).
+    load_dotenv()
 
     host = os.getenv("QDRANT_HOST", "localhost")
     port = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
     client = QdrantClient(
-        host=host, grpc_port=port, prefer_grpc=True, https=False, check_compatibility=False
+        host=host,
+        grpc_port=port,
+        prefer_grpc=True,
+        api_key=os.getenv("QDRANT_API_KEY") or None,
+        https=False,
+        check_compatibility=False,
     )
 
     client.create_collection(
         collection_name=TEST_COLLECTION,
-        vectors_config=VectorsConfig(
-            root={
-                "dense": VectorParams(size=1024, distance=Distance.COSINE),
-                "colbert": VectorParams(
-                    size=1024,
-                    distance=Distance.COSINE,
-                    multivector_config=MultiVectorConfig(comparator=MultiVectorComparator.MAX_SIM),
-                ),
-            }
-        ),
+        vectors_config={
+            "dense": VectorParams(size=1024, distance=Distance.COSINE),
+            "colbert": VectorParams(
+                size=1024,
+                distance=Distance.COSINE,
+                multivector_config=MultiVectorConfig(comparator=MultiVectorComparator.MAX_SIM),
+            ),
+        },
         sparse_vectors_config={"sparse": SparseVectorParams(index=SparseIndexParams())},
     )
     client.create_payload_index(TEST_COLLECTION, "source_path", "keyword")
@@ -106,8 +112,10 @@ def app_client(qdrant_client: Any, bge_model: Any) -> Generator[TestClient, None
         patch("titan.service.app.COLLECTION_NAME", TEST_COLLECTION),
     ):
         app = create_app()
-        with TestClient(app, raise_server_exceptions=True) as client:
-            yield client
+        # TestClient ohne Kontextmanager: der lifespan würde sonst BGE-M3 und
+        # Qdrant neu laden und den hier vorinjizierten State überschreiben.
+        client = TestClient(app, raise_server_exceptions=True)
+        yield client
 
     # Cleanup State
     if torch.cuda.is_available():
@@ -154,23 +162,29 @@ def test_health_degraded_without_qdrant() -> None:
         "colbert_vecs": [[[0.1] * 1024]],
     }
 
-    state.bge_model = mock_model
-    state.qdrant_client = None  # kein Client → degraded
-    state.domain_counts = Counter()
+    # state ist ein Singleton — sichern und nach dem Test wiederherstellen,
+    # damit nachfolgende Tests den von app_client injizierten State behalten.
+    saved = (state.bge_model, state.qdrant_client, state.domain_counts)
+    try:
+        state.bge_model = mock_model
+        state.qdrant_client = None  # kein Client → degraded
+        state.domain_counts = Counter()
 
-    with (
-        patch.dict(os.environ, {"COLLECTION_NAME": TEST_COLLECTION}),
-        patch("titan.service.routes.COLLECTION_NAME", TEST_COLLECTION),
-    ):
-        app = create_app()
-        with TestClient(app, raise_server_exceptions=False) as client:
+        with (
+            patch.dict(os.environ, {"COLLECTION_NAME": TEST_COLLECTION}),
+            patch("titan.service.routes.COLLECTION_NAME", TEST_COLLECTION),
+        ):
+            app = create_app()
+            # Ohne Kontextmanager: der lifespan würde sonst echte Ressourcen laden
+            # und den degraded-Zustand (qdrant_client=None) überschreiben.
+            client = TestClient(app, raise_server_exceptions=False)
             resp = client.get("/health")
 
-    assert resp.status_code == 200
-    assert resp.json()["status"] == "degraded"
-    assert resp.json()["qdrant_reachable"] is False
-
-    state.bge_model = None
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "degraded"
+        assert resp.json()["qdrant_reachable"] is False
+    finally:
+        state.bge_model, state.qdrant_client, state.domain_counts = saved
 
 
 # ─── Domains Tests ────────────────────────────────────────────────────────────
@@ -473,3 +487,42 @@ def test_delete_outside_vault(app_client: TestClient, tmp_path: Path) -> None:
             params={"source_path": str(tmp_path / "outside.md")},
         )
     assert resp.status_code == 400
+
+
+# ─── Notes ────────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_notes_lists_ingested_note(app_client: TestClient, tmp_vault: Path) -> None:
+    """GET /notes listet eine ingestete Note mit Domain und Chunk-Count."""
+    note = tmp_vault / "listed_note.md"
+    note.write_text("---\ndomain: notes_test\n---\n# Listed\nInhalt zum Auflisten. KAPPA7777.")
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        ingest = app_client.post("/ingest/file", json={"file_path": str(note)})
+        resp = app_client.get("/notes")
+
+    assert ingest.status_code == 200
+    assert resp.status_code == 200
+    data = resp.json()
+    entry = next((n for n in data["notes"] if n["source_path"] == str(note)), None)
+    assert entry is not None, "ingestete Note fehlt in /notes"
+    assert entry["domain"] == "notes_test"
+    assert entry["chunk_count"] == ingest.json()["chunks_created"]
+    assert data["total"] == len(data["notes"])
+
+
+@pytest.mark.integration
+def test_notes_excludes_deleted_note(app_client: TestClient, tmp_vault: Path) -> None:
+    """Nach DELETE /chunks taucht die Note nicht mehr in /notes auf."""
+    note = tmp_vault / "soon_gone.md"
+    note.write_text("---\ndomain: notes_test\n---\nWird gleich entfernt. LAMBDA8888.")
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        app_client.post("/ingest/file", json={"file_path": str(note)})
+        app_client.request("DELETE", "/chunks", params={"source_path": str(note)})
+        resp = app_client.get("/notes")
+
+    assert resp.status_code == 200
+    paths = [n["source_path"] for n in resp.json()["notes"]]
+    assert str(note) not in paths

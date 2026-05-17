@@ -142,3 +142,32 @@ falls leer, ist die Note per altem CLI-Pfad ingested.
 **Decision:** Das Setup setzt voraus, dass Docker Desktop (für Container) läuft, WSL2 Mirrored Networking aktiv ist und `QDRANT_HOST=localhost` konfiguriert ist.
 **Reasoning:** Undokumentierte Netzwerk-Setups führen nach einiger Zeit unweigerlich zu langwierigem Debugging der Qdrant-Verbindung. Da Titan auf den Qdrant-Container über `localhost` zugreift, muss in WSL2 Mirrored Networking zwingend aktiviert sein, damit das Port-Mapping greift.
 **Consequences:** Bei `ConnectError` zu Qdrant immer zuerst prüfen: Läuft Docker Desktop? Ist Mirrored Networking in `.wslconfig` aktiv?
+
+## 2026-05-17: GET /notes — alle indexierten Notes auflisten
+
+**Decision:** Neuer Endpoint `GET /notes` listet alle indexierten Notes, gruppiert nach
+`source_path`, mit Domain und Chunk-Count. Scrollt die gesamte Collection (Pagination
+à 256) und aggregiert in-memory.
+**Reasoning:** brain-mcp braucht für sein neues `list_notes`-Tool eine Übersicht aller
+indexierten Dateien. `GET /domains` liefert nur Domain-Counts, nicht einzelne Notes. Ein
+Voll-Scroll ist für einen persönlichen Vault (einige hundert/tausend Chunks) unkritisch.
+**Consequences:** Neue Schemas `NoteInfo` / `NotesResponse`. Bei sehr großen Collections
+wäre ein gecachter Counter (wie `domain_counts`) effizienter — bei Bedarf nachrüsten.
+
+## 2026-05-17: Integrationstests repariert (Versions-Drift + Test-Isolation)
+
+**Decision:** `tests/integration/test_service.py` an den aktuellen Stand angepasst.
+**Reasoning:** Die Integrationssuite war komplett rot und nicht mehr lauffähig — vier
+übereinanderliegende Defekte:
+1. `VectorsConfig(root=...)` — in qdrant-client 1.18 ist `VectorsConfig` ein
+   `typing.Union`-Alias, nicht instanziierbar. Fix: `vectors_config` direkt als Dict
+   übergeben (wie der Produktivcode in `init_col.py`).
+2. Qdrant verlangt inzwischen einen API-Key — die `qdrant_client`-Fixture gab keinen
+   mit. Fix: `load_dotenv()` + `api_key=os.getenv("QDRANT_API_KEY")`.
+3. `TestClient(app)` als Kontextmanager ließ den `lifespan` laufen, der BGE-M3 und
+   Qdrant neu lädt und den vorinjizierten Test-State überschrieb. Fix: ohne `with`.
+4. `test_health_degraded_without_qdrant` mutierte das `state`-Singleton ohne es
+   wiederherzustellen — alle Folgetests sahen `None` (503). Fix: save/restore.
+**Consequences:** Suite läuft wieder (19/20 grün). Ein gelegentlicher grpc-Fehler beim
+Collection-Teardown des letzten Tests bleibt — separate Teardown-Robustheit, offen.
+Integrationstests müssen bei gestopptem `titan-service` laufen (BGE-M3-GPU-Lock).

@@ -10,6 +10,7 @@ Endpoints:
     GET  /domains         – Alle Domains mit Chunk-Counts (A7)
     POST /find_related    – Semantisch ähnliche Notes (A8)
     DELETE /chunks        – Chunks einer Datei löschen (A9)
+    GET  /notes           – Alle indexierten Notes mit Chunk-Counts (A11)
 """
 
 from __future__ import annotations
@@ -34,6 +35,8 @@ from titan.service.schemas import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    NoteInfo,
+    NotesResponse,
     SearchRequest,
     SearchResponse,
 )
@@ -371,3 +374,45 @@ async def delete_chunks(source_path: str) -> DeleteChunksResponse:
         state.domain_counts[domain_to_update] = max(0, state.domain_counts[domain_to_update] - n)
 
     return DeleteChunksResponse(source_path=str(path), chunks_deleted=n)
+
+
+# ─── Notes (A11) ─────────────────────────────────────────────────────────────
+
+
+@router.get("/notes", response_model=NotesResponse)
+async def list_notes() -> NotesResponse:
+    """Listet alle indexierten Notes, gruppiert nach source_path.
+
+    Scrollt die gesamte Collection und aggregiert pro Datei die Chunk-Anzahl
+    und Domain. Für einen persönlichen Vault (einige hundert/tausend Chunks)
+    unkritisch.
+    """
+    if state.qdrant_client is None:
+        raise HTTPException(503, "Service nicht bereit")
+
+    counts: dict[str, int] = {}
+    domains: dict[str, str] = {}
+    offset = None
+    while True:
+        records, offset = state.qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=256,
+            offset=offset,
+            with_payload=["source_path", "domain"],
+            with_vectors=False,
+        )
+        for record in records:
+            payload = record.payload or {}
+            source_path = str(payload.get("source_path", ""))
+            if not source_path:
+                continue
+            counts[source_path] = counts.get(source_path, 0) + 1
+            domains.setdefault(source_path, str(payload.get("domain", "")))
+        if offset is None:
+            break
+
+    notes = [
+        NoteInfo(source_path=sp, domain=domains[sp], chunk_count=counts[sp])
+        for sp in sorted(counts)
+    ]
+    return NotesResponse(notes=notes, total=len(notes))

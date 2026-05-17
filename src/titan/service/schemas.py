@@ -96,3 +96,17 @@ class FindRelatedResponse(BaseModel):
 class DeleteChunksResponse(BaseModel):
     source_path: str
     chunks_deleted: int
+
+
+# ─── Notes ───────────────────────────────────────────────────────────────────
+
+
+class NoteInfo(BaseModel):
+    source_path: str
+    domain: str
+    chunk_count: int
+
+
+class NotesResponse(BaseModel):
+    notes: list[NoteInfo]  # alphabetisch nach source_path sortiert
+    total: int

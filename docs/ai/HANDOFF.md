@@ -1,3 +1,33 @@
+# Handoff – 2026-05-17
+Model: Claude Opus 4.7
+
+## Done in this session
+
+`GET /notes` ergänzt — Endpoint für die Liste aller indexierten Notes (gruppiert nach
+Datei, mit Domain + Chunk-Count). Dient dem neuen `list_notes`-Tool in brain-mcp.
+
+**Code-Änderungen:**
+- `src/titan/service/schemas.py` — neue Schemas `NoteInfo`, `NotesResponse`
+- `src/titan/service/routes.py` — `GET /notes` (Voll-Scroll + Aggregation)
+- `tests/integration/test_service.py` — `/notes`-Integrationstests + Reparatur der
+  bis dahin komplett roten Suite (Details: DECISIONS.md 2026-05-17)
+
+**Qualitätsstand:** `ruff` grün, `mypy` grün, Unit-Tests 12 passed, Integrationssuite
+19/20 grün (1 flaky Teardown).
+
+## Kontext
+
+Teil von „Etappe 2 — vault-admin": brain-mcp bekommt die Tools `list_notes` und
+`delete_note`. titan liefert dafür nur den neuen `/notes`-Endpoint; `delete_note` nutzt
+den bestehenden `DELETE /chunks`. Siehe brain-mcp `docs/ai/` (2026-05-17).
+
+## Offen / Next steps
+
+- Flaky grpc-Fehler beim Collection-Teardown des letzten Integrationstests.
+- Integrationstests laufen nur bei gestopptem titan-service (BGE-M3-GPU-Lock).
+
+---
+
 # Handoff – 2026-05-16
 
 ## Done in this session
