@@ -35,139 +35,139 @@
 
 ---
 
-## 2026-05-12: Big-Bang-Migration aus RAG_System, Epic 5A v1.0 nicht portiert
-**Decision:** Code aus `~/projects/RAG_System/execution/` wird 1:1 in `src/titan/` portiert.
-Epic 5A (Contextual Retrieval via Phi-4-Summaries) wird beim Port bewusst entfernt.
-**Reasoning:** Epic 5A v1.0 hatte zu hohe Latenz und zu wenig Retrieval-Gewinn für den Aufwand.
-Neuimplementierung (Epic 5A v2.0) soll sauber auf der neuen Code-Basis starten, nicht auf altem Code.
-**Alternatives considered:** Selektiver Port mit Feature-Flag für 5A — verworfen, da totes Feature
-im Code Verwirrung stiftet und mypy-Hygiene erschwert.
-**Consequences:** `~/projects/RAG_System/` bleibt unverändert als Referenz. Wer 5A-Code braucht,
-liest dort nach. Alle `--contextual`, `--clear-summary-cache`, `--summary-cache-stats` Flags entfallen.
+## 2026-05-12: Big-bang migration from RAG_System, Epic 5A v1.0 not ported
+**Decision:** Code from `~/projects/RAG_System/execution/` is ported 1:1 into `src/titan/`.
+Epic 5A (Contextual Retrieval via Phi-4 summaries) is deliberately removed during the port.
+**Reasoning:** Epic 5A v1.0 had too high latency and too little retrieval gain for the effort.
+The reimplementation (Epic 5A v2.0) should start cleanly on the new code base, not on old code.
+**Alternatives considered:** A selective port with a feature flag for 5A — rejected, since a dead
+feature in the code causes confusion and complicates mypy hygiene.
+**Consequences:** `~/projects/RAG_System/` stays unchanged as a reference. Whoever needs 5A code
+reads it there. All `--contextual`, `--clear-summary-cache`, `--summary-cache-stats` flags are dropped.
 
-## 2026-05-12: Package-Struktur flach unter src/titan/
-**Decision:** Flache Struktur: `src/titan/utils.py`, `src/titan/ingest.py` etc. statt
-`src/titan/rag_system/execution/utils.py` (altes Layout).
-**Reasoning:** Das alte `rag_system/execution/`-Prefix war ein Workaround ohne Package-Namespace.
-Mit `titan` als Package-Name ist die zusätzliche Verschachtelung reiner Overhead.
-**Consequences:** Import-Pfade lauten `from titan.utils import ...` — kurz und eindeutig.
+## 2026-05-12: Flat package structure under src/titan/
+**Decision:** Flat structure: `src/titan/utils.py`, `src/titan/ingest.py` etc. instead of
+`src/titan/rag_system/execution/utils.py` (the old layout).
+**Reasoning:** The old `rag_system/execution/` prefix was a workaround without a package namespace.
+With `titan` as the package name, the extra nesting is pure overhead.
+**Consequences:** Import paths read `from titan.utils import ...` — short and unambiguous.
 
-## 2026-05-12: mypy ignore_missing_imports für ML-Bibliotheken
-**Decision:** `ignore_missing_imports = true` in `[[tool.mypy.overrides]]` für `flagembedding`,
-`docling`, und ggf. `torch` (je nach Stub-Verfügbarkeit).
-**Reasoning:** Diese Libraries haben keine Typestubs. mypy strict würde sonst auf jeden Import
-knallen. Das ist kein echtes Typ-Problem, sondern fehlende Third-Party-Stubs.
-**Consequences:** Diese Module sind von der Typ-Prüfung ausgenommen — ein akzeptabler Kompromiss
-solange keine Community-Stubs verfügbar sind.
+## 2026-05-12: mypy ignore_missing_imports for ML libraries
+**Decision:** `ignore_missing_imports = true` in `[[tool.mypy.overrides]]` for `flagembedding`,
+`docling`, and possibly `torch` (depending on stub availability).
+**Reasoning:** These libraries have no type stubs. mypy strict would otherwise fail on every import.
+That's not a real type problem, just missing third-party stubs.
+**Consequences:** These modules are exempt from type checking — an acceptable compromise as long as
+no community stubs are available.
 
-## 2026-05-12: ColBERT-Vektordimension 1024 (FlagEmbedding ≥ 1.3)
-**Decision:** Qdrant-Collection wird mit `colbert.size=1024` angelegt.
-**Reasoning:** FlagEmbedding hat ab Version 1.3 die ColBERT-Ausgabedimension von 128 auf 1024
-geändert. Die Collection muss exakt zur installierten Library-Version passen — falscher Wert führt
-zu Upsert-Fehlern oder unbrauchbaren Retrieval-Ergebnissen ohne offensichtliche Fehlermeldung.
-**Alternatives considered:** 128 (Vorversion) — verworfen, da ab FE 1.3 faktisch falsch.
-**Consequences:** `flagembedding>=1.3` ist implizite Mindestanforderung (pyproject.toml deklariert
-`>=1.4.0`). Bei FlagEmbedding-Upgrade: Release Notes auf ColBERT-Dim-Änderungen prüfen. Bei
-Downgrade unter 1.3: Collection mit `init_col.py --recreate` neu anlegen mit `colbert.size=128`.
+## 2026-05-12: ColBERT vector dimension 1024 (FlagEmbedding ≥ 1.3)
+**Decision:** The Qdrant collection is created with `colbert.size=1024`.
+**Reasoning:** FlagEmbedding changed the ColBERT output dimension from 128 to 1024 as of version 1.3.
+The collection must match the installed library version exactly — a wrong value leads to upsert
+errors or unusable retrieval results without an obvious error message.
+**Alternatives considered:** 128 (previous version) — rejected, since it is effectively wrong from FE 1.3 on.
+**Consequences:** `flagembedding>=1.3` is an implicit minimum requirement (pyproject.toml declares
+`>=1.4.0`). On a FlagEmbedding upgrade: check the release notes for ColBERT dim changes. On a
+downgrade below 1.3: recreate the collection with `init_col.py --recreate` using `colbert.size=128`.
 
-## 2026-05-12: GPU_LOCK_PATH Default auf /tmp/bge_m3.lock geändert
-**Decision:** GPU-Lock-Datei liegt unter `/tmp/bge_m3.lock` (war `/tmp/rag_gpu.lock` im alten
-RAG_System-Repo).
-**Reasoning:** Der neue Lock-Pfad reflektiert den neuen Package-Namen und vermeidet Kollisionen
-mit noch laufenden Prozessen aus dem alten RAG_System-Setup.
-**Consequences:** Wer vom alten RAG_System migriert: einmalig `rm -f /tmp/rag_gpu.lock` ausführen,
-damit kein veralteter Lock-File einen Prozess-Start blockiert. Der neue Pfad kann via `.env`
-überschrieben werden (`GPU_LOCK_PATH=/tmp/bge_m3.lock`).
+## 2026-05-12: GPU_LOCK_PATH default changed to /tmp/bge_m3.lock
+**Decision:** The GPU lock file lives at `/tmp/bge_m3.lock` (was `/tmp/rag_gpu.lock` in the old
+RAG_System repo).
+**Reasoning:** The new lock path reflects the new package name and avoids collisions with still-running
+processes from the old RAG_System setup.
+**Consequences:** Whoever migrates from the old RAG_System: run `rm -f /tmp/rag_gpu.lock` once so a
+stale lock file doesn't block a process start. The new path can be overridden via `.env`
+(`GPU_LOCK_PATH=/tmp/bge_m3.lock`).
 
 ---
 
-## 2026-05-12: run_id-Payload-Konvention für Upsert-before-Delete
-**Decision:** Jeder Ingest-Run setzt eine UUID (`run_id`) im Chunk-Payload.
-Beim Re-Ingest: neue Chunks mit neuem `run_id` einfügen, dann alte Chunks mit
-anderem `run_id` für dieselbe `source_path` löschen.
-**Reasoning:** Verhindert Downtime-Fenster: Solange Schritt 2 (Upsert) läuft,
-sind die alten Chunks noch durchsuchbar. Wenn Schritt 2 crasht, bleibt der alte
-Stand erhalten. Doppelte Chunks (alter + neuer Run) sind harmlos — RRF gewichtet
-sie gleichwertig und der nächste Lauf bereinigt.
-**Alternatives considered:** Delete-before-Insert (führt zu Lücken während Re-Indexierung).
-**Consequences:** `run_id` ist Pflicht-Payload-Feld für alle Ingest-Aufrufe via Service.
-CLI-Ingest (`python -m titan.ingest`) nutzt diese Konvention noch nicht — das ist akzeptabel
-da der CLI-Pfad typischerweise für Erst-Ingest genutzt wird.
+## 2026-05-12: run_id payload convention for upsert-before-delete
+**Decision:** Every ingest run sets a UUID (`run_id`) in the chunk payload.
+On re-ingest: insert new chunks with a new `run_id`, then delete old chunks with a
+different `run_id` for the same `source_path`.
+**Reasoning:** Prevents a downtime window: as long as step 2 (upsert) is running, the old chunks are
+still searchable. If step 2 crashes, the old state is preserved. Duplicate chunks (old + new run) are
+harmless — RRF weights them equally and the next run cleans up.
+**Alternatives considered:** Delete-before-insert (leads to gaps during re-indexing).
+**Consequences:** `run_id` is a mandatory payload field for all ingest calls via the service.
+CLI ingest (`python -m titan.ingest`) doesn't use this convention yet — that's acceptable since the
+CLI path is typically used for the first ingest.
 
-## 2026-05-12: indexed:false Semantik — Service entscheidet, Client trusts
-**Decision:** Frontmatter-Feld `indexed: false` wird ausschließlich vom Service
-ausgewertet. Der Watcher (brain-mcp Phase 2) sendet den Pfad ohne Frontmatter-Auswertung.
-**Reasoning:** Einzige Stelle die die Semantik kennt → kein Sync-Problem wenn sich
-die Semantik ändert.
-**Consequences:** `POST /ingest/file` bei `indexed:false`: löscht existierende Chunks,
-gibt `skipped_reason: "indexed:false"` zurück, erstellt keine neuen Chunks.
+## 2026-05-12: indexed:false semantics — the service decides, the client trusts
+**Decision:** The frontmatter field `indexed: false` is evaluated exclusively by the service.
+The watcher (brain-mcp Phase 2) sends the path without evaluating frontmatter.
+**Reasoning:** A single place that knows the semantics → no sync problem when the semantics change.
+**Consequences:** `POST /ingest/file` with `indexed:false`: deletes existing chunks, returns
+`skipped_reason: "indexed:false"`, creates no new chunks.
 
-## 2026-05-12: Cache-Invalidierung aggressiv (Domain-granular)
-**Decision:** Bei Re-Ingest einer Note werden ALLE Cache-Einträge ihrer Domain geleert.
-**Reasoning:** Einfachste korrekte Implementierung. Cache-Hit für "alten" Stand vermeiden
-ohne Chunk→Cache-Dependency-Tracking.
-**Alternatives considered:** Feingranulare Invalidierung nur für Einträge die die geänderte
-Note enthielten — braucht Cache→Chunk-Tracking das Epic 5B nicht implementiert.
-**Consequences:** Bei häufigen Edits in einer Domain kann die Cache-Hit-Rate sinken.
-Wenn das messbar problematisch wird: feineres Tracking nachrüsten.
+## 2026-05-12: Aggressive cache invalidation (domain-granular)
+**Decision:** On re-ingest of a note, ALL cache entries of its domain are cleared.
+**Reasoning:** The simplest correct implementation. Avoids a cache hit for the "old" state without
+chunk→cache dependency tracking.
+**Alternatives considered:** Fine-grained invalidation only for entries that contained the changed
+note — needs cache→chunk tracking that Epic 5B doesn't implement.
+**Consequences:** With frequent edits in one domain the cache hit rate can drop. If that becomes
+measurably problematic: add finer tracking.
 
-## 2026-05-13: Cache-Invalidierung in titan.search, nicht in routes
+## 2026-05-13: Cache invalidation in titan.search, not in routes
 
-**Decision:** `invalidate_domain_cache(qdrant_client, domain)` lebt in `titan.search`,
-nicht in `titan.service.routes`.
-**Reasoning:** Audit T-MED-2: Die Funktion braucht nur `qdrant_client` und die globalen
-Cache-Konstanten (`CACHE_COLLECTION_NAME`, `CACHE_ENABLED`) — beides aus `search.py` zugreifbar.
-In `routes` war sie wegen des `state.qdrant_client` gelandet, aber das ist kein valides Argument:
-`search()` nimmt den Client auch als Parameter. Damit ist die Funktion ohne FastAPI testbar.
-**Consequences:** Routes importieren `invalidate_domain_cache` aus `titan.search`.
+**Decision:** `invalidate_domain_cache(qdrant_client, domain)` lives in `titan.search`, not in
+`titan.service.routes`.
+**Reasoning:** Audit T-MED-2: the function only needs `qdrant_client` and the global cache constants
+(`CACHE_COLLECTION_NAME`, `CACHE_ENABLED`) — both accessible from `search.py`. In `routes` it had
+ended up there because of `state.qdrant_client`, but that's not a valid argument: `search()` also takes
+the client as a parameter. This makes the function testable without FastAPI.
+**Consequences:** Routes import `invalidate_domain_cache` from `titan.search`.
 
-## 2026-05-13: Service bindet nur auf 127.0.0.1 (kein Remote-Zugriff)
+## 2026-05-13: The service binds only to 127.0.0.1 (no remote access)
 
-**Decision:** uvicorn läuft auf `host="127.0.0.1"`, keine Konfigurierbarkeit nach außen.
-**Reasoning:** Der Service ist für Single-User-Betrieb auf dem lokalen Rechner konzipiert.
-Exposition auf öffentliche IPs würde Auth, Rate-Limit und TLS erfordern.
-Audit-Bewertung (Sicherheits-Tabelle): ✅ akzeptables Härtungsniveau für Single-User-Setup.
-**Consequences:** Wer Multi-User oder Remote benötigt: Reverse-Proxy mit Auth davor, dann
-`VAULT_ROOT` und alle Path-Checks überprüfen.
+**Decision:** uvicorn runs on `host="127.0.0.1"`, with no external configurability.
+**Reasoning:** The service is designed for single-user operation on the local machine. Exposing it on
+public IPs would require auth, rate limiting and TLS.
+Audit assessment (security table): ✅ acceptable hardening level for a single-user setup.
+**Consequences:** Whoever needs multi-user or remote: put a reverse proxy with auth in front, then
+review `VAULT_ROOT` and all path checks.
 
-## 2026-05-12: source_path + source als Payload-Aliases
-**Decision:** Neue Ingest-Uploads via Service setzen sowohl `source_path` als auch
-`source` im Qdrant-Payload. Alte CLI-Ingests haben nur `source`.
-**Reasoning:** Rückwärtskompatibilität: Bestehende Chunks im Index bleiben nutzbar.
-Service-Schema (`Chunk.source_path`) ist der neue Standard.
-**Consequences:** Search-Ergebnisse liefern beide Keys. Routes-Code nutzt `source_path`;
-falls leer, ist die Note per altem CLI-Pfad ingested.
+## 2026-05-12: source_path + source as payload aliases
+**Decision:** New ingest uploads via the service set both `source_path` and `source` in the Qdrant
+payload. Old CLI ingests have only `source`.
+**Reasoning:** Backward compatibility: existing chunks in the index stay usable. The service schema
+(`Chunk.source_path`) is the new standard.
+**Consequences:** Search results return both keys. The routes code uses `source_path`; if empty, the
+note was ingested via the old CLI path.
 
-## 2026-05-16: Setup-Annahme - WSL2 Mirrored Networking & Docker Desktop
-**Decision:** Das Setup setzt voraus, dass Docker Desktop (für Container) läuft, WSL2 Mirrored Networking aktiv ist und `QDRANT_HOST=localhost` konfiguriert ist.
-**Reasoning:** Undokumentierte Netzwerk-Setups führen nach einiger Zeit unweigerlich zu langwierigem Debugging der Qdrant-Verbindung. Da Titan auf den Qdrant-Container über `localhost` zugreift, muss in WSL2 Mirrored Networking zwingend aktiviert sein, damit das Port-Mapping greift.
-**Consequences:** Bei `ConnectError` zu Qdrant immer zuerst prüfen: Läuft Docker Desktop? Ist Mirrored Networking in `.wslconfig` aktiv?
+## 2026-05-16: Setup assumption — WSL2 mirrored networking & Docker Desktop
+**Decision:** The setup assumes that Docker Desktop (for containers) is running, WSL2 mirrored
+networking is active, and `QDRANT_HOST=localhost` is configured.
+**Reasoning:** Undocumented network setups inevitably lead to lengthy debugging of the Qdrant
+connection over time. Since Titan accesses the Qdrant container via `localhost`, mirrored networking
+must be enabled in WSL2 for the port mapping to work.
+**Consequences:** On a `ConnectError` to Qdrant always check first: is Docker Desktop running? Is
+mirrored networking active in `.wslconfig`?
 
-## 2026-05-17: GET /notes — alle indexierten Notes auflisten
+## 2026-05-17: GET /notes — list all indexed notes
 
-**Decision:** Neuer Endpoint `GET /notes` listet alle indexierten Notes, gruppiert nach
-`source_path`, mit Domain und Chunk-Count. Scrollt die gesamte Collection (Pagination
-à 256) und aggregiert in-memory.
-**Reasoning:** brain-mcp braucht für sein neues `list_notes`-Tool eine Übersicht aller
-indexierten Dateien. `GET /domains` liefert nur Domain-Counts, nicht einzelne Notes. Ein
-Voll-Scroll ist für einen persönlichen Vault (einige hundert/tausend Chunks) unkritisch.
-**Consequences:** Neue Schemas `NoteInfo` / `NotesResponse`. Bei sehr großen Collections
-wäre ein gecachter Counter (wie `domain_counts`) effizienter — bei Bedarf nachrüsten.
+**Decision:** A new endpoint `GET /notes` lists all indexed notes, grouped by `source_path`, with
+domain and chunk count. It scrolls the entire collection (pagination of 256) and aggregates in-memory.
+**Reasoning:** brain-mcp needs an overview of all indexed files for its new `list_notes` tool.
+`GET /domains` only returns domain counts, not individual notes. A full scroll is uncritical for a
+personal vault (a few hundred/thousand chunks).
+**Consequences:** New schemas `NoteInfo` / `NotesResponse`. For very large collections a cached counter
+(like `domain_counts`) would be more efficient — add it if needed.
 
-## 2026-05-17: Integrationstests repariert (Versions-Drift + Test-Isolation)
+## 2026-05-17: Integration tests repaired (version drift + test isolation)
 
-**Decision:** `tests/integration/test_service.py` an den aktuellen Stand angepasst.
-**Reasoning:** Die Integrationssuite war komplett rot und nicht mehr lauffähig — vier
-übereinanderliegende Defekte:
-1. `VectorsConfig(root=...)` — in qdrant-client 1.18 ist `VectorsConfig` ein
-   `typing.Union`-Alias, nicht instanziierbar. Fix: `vectors_config` direkt als Dict
-   übergeben (wie der Produktivcode in `init_col.py`).
-2. Qdrant verlangt inzwischen einen API-Key — die `qdrant_client`-Fixture gab keinen
-   mit. Fix: `load_dotenv()` + `api_key=os.getenv("QDRANT_API_KEY")`.
-3. `TestClient(app)` als Kontextmanager ließ den `lifespan` laufen, der BGE-M3 und
-   Qdrant neu lädt und den vorinjizierten Test-State überschrieb. Fix: ohne `with`.
-4. `test_health_degraded_without_qdrant` mutierte das `state`-Singleton ohne es
-   wiederherzustellen — alle Folgetests sahen `None` (503). Fix: save/restore.
-**Consequences:** Suite läuft wieder (19/20 grün). Ein gelegentlicher grpc-Fehler beim
-Collection-Teardown des letzten Tests bleibt — separate Teardown-Robustheit, offen.
-Integrationstests müssen bei gestopptem `titan-service` laufen (BGE-M3-GPU-Lock).
+**Decision:** `tests/integration/test_service.py` brought up to the current state.
+**Reasoning:** The integration suite was completely red and no longer runnable — four overlapping defects:
+1. `VectorsConfig(root=...)` — in qdrant-client 1.18 `VectorsConfig` is a `typing.Union` alias, not
+   instantiable. Fix: pass `vectors_config` directly as a dict (like the production code in
+   `init_col.py`).
+2. Qdrant now requires an API key — the `qdrant_client` fixture didn't pass one. Fix: `load_dotenv()`
+   + `api_key=os.getenv("QDRANT_API_KEY")`.
+3. `TestClient(app)` as a context manager ran the `lifespan`, which reloads BGE-M3 and Qdrant and
+   overwrote the pre-injected test state. Fix: without `with`.
+4. `test_health_degraded_without_qdrant` mutated the `state` singleton without restoring it — all
+   subsequent tests saw `None` (503). Fix: save/restore.
+**Consequences:** The suite runs again (19/20 green). An occasional grpc error on the collection
+teardown of the last test remains — separate teardown robustness, open. Integration tests must run
+with `titan-service` stopped (BGE-M3 GPU lock).

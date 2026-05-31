@@ -4,15 +4,16 @@
 
 ## Overview
 
-Titan ist ein lokales RAG-System (Retrieval-Augmented Generation) auf einer einzelnen
-Workstation. Dokumente (PDFs, Markdown) werden mit BGE-M3 multi-vektoriell eingebettet
-(dense + sparse + ColBERT) und in Qdrant gespeichert. Suchanfragen werden via Hybrid-Search
-(Prefetch + ColBERT MaxSim Reranking) und Reciprocal Rank Fusion beantwortet;
-die Antwort-Generierung erfolgt durch Phi-4 via Ollama.
+Titan is a local RAG (Retrieval-Augmented Generation) system on a single
+workstation. Documents (PDFs, Markdown) are embedded multi-vectorially with BGE-M3
+(dense + sparse + ColBERT) and stored in Qdrant. Queries are answered via hybrid
+search (prefetch + ColBERT MaxSim reranking) and Reciprocal Rank Fusion; answer
+generation is done by Phi-4 via Ollama.
 
-Ab Phase 1 läuft ein **FastAPI-Service** (`titan service`) der BGE-M3 dauerhaft im VRAM hält
-und eine HTTP-API für Suche und Ingest bereitstellt. Ein MCP-Server (`brain-mcp`, Phase 2)
-macht das System für Claude Desktop nutzbar und beobachtet den Obsidian-Vault per Watchdog.
+From Phase 1 on, a **FastAPI service** (`titan service`) keeps BGE-M3 permanently in
+VRAM and exposes an HTTP API for search and ingest. An MCP server (`brain-mcp`,
+Phase 2) makes the system usable from Claude and watches the Obsidian vault via
+watchdog.
 
 ## Module Map
 
@@ -20,58 +21,58 @@ macht das System für Claude Desktop nutzbar und beobachtet den Obsidian-Vault p
 src/titan/
 ├── __init__.py
 ├── __main__.py          # CLI: python -m titan [service | ...]
-├── main.py              # Dispatcher: Service-Mode + Hilfe
-├── utils.py             # GPU-Lock (fcntl), stable_uuid, cache_uuid, sanitize
-├── ingest.py            # PDF-Parsing (Docling), Markdown-Reader (frontmatter),
-│                        # Late Chunking, BGE-M3 Embed, make_point, Qdrant-Upsert
-├── search.py            # Query-Decompose (Phi-4), BGE-M3, Hybrid-Search (RRF),
-│                        # Epic-5B Semantic Cache; search() injectable für Service
-├── generate.py          # Phi-4 Antwort-Generierung (liest Chunks von stdin)
-├── evaluate.py          # LLM-as-Judge (RAG-Triade: CR / GR / AR)
+├── main.py              # Dispatcher: service mode + help
+├── utils.py             # GPU lock (fcntl), stable_uuid, cache_uuid, sanitize
+├── ingest.py            # PDF parsing (Docling), Markdown reader (frontmatter),
+│                        # Late Chunking, BGE-M3 embed, make_point, Qdrant upsert
+├── search.py            # Query decompose (Phi-4), BGE-M3, hybrid search (RRF),
+│                        # Epic-5B semantic cache; search() injectable for the service
+├── generate.py          # Phi-4 answer generation (reads chunks from stdin)
+├── evaluate.py          # LLM-as-judge (RAG triad: CR / GR / AR)
 ├── service/
 │   ├── __init__.py
-│   ├── _vram_probe.py   # Einmaliges VRAM-Mess-Skript (A0)
-│   ├── state.py         # ServiceState Singleton (model, client, gpu_lock, domain_counts)
-│   ├── app.py           # FastAPI App + Lifespan (BGE-M3 laden, ColBERT-Dim-Check)
-│   ├── schemas.py       # Pydantic Request/Response Types
-│   └── routes.py        # Alle Endpoints: /health /search /ingest/file /domains
-│                        #                 /find_related DELETE /chunks
+│   ├── _vram_probe.py   # One-off VRAM measurement script (A0)
+│   ├── state.py         # ServiceState singleton (model, client, gpu_lock, domain_counts)
+│   ├── app.py           # FastAPI app + lifespan (load BGE-M3, ColBERT dim check)
+│   ├── schemas.py       # Pydantic request/response types
+│   └── routes.py        # All endpoints: /health /search /ingest/file /domains
+│                        #                /notes /find_related DELETE /chunks
 ├── eval/
-│   ├── ab_eval.py       # A/B-Evaluierung über Eval-Cases
+│   ├── ab_eval.py       # A/B evaluation over eval cases
 │   └── fixtures/cases.json
 └── tools/
-    └── init_col.py      # Qdrant-Collection initialisieren (--recreate)
+    └── init_col.py      # Initialize the Qdrant collection (--recreate)
 
 deploy/
-├── titan-service.service  # systemd User-Service
-└── README.md              # Installations-Anleitung
+├── titan-service.service  # systemd user service
+└── README.md              # installation guide
 
 tests/
-├── titan/               # Unit-Tests (mirrors src/titan/)
+├── titan/               # Unit tests (mirrors src/titan/)
 └── integration/
-    └── test_service.py  # 16 Integration-Tests (pytest.mark.integration)
+    └── test_service.py  # 16 integration tests (pytest.mark.integration)
 ```
 
 ## Data Model
 
-### Qdrant Chunk (Payload)
+### Qdrant Chunk (payload)
 
 ```
 {
-  "text":         str,   # Chunk-Text
-  "source":       str,   # Dateipfad (CLI-Ingest legacy)
-  "source_path":  str,   # Dateipfad (Service-Ingest, Alias zu source)
-  "chunk_id":     int,   # Position im Dokument (0-basiert)
-  "chunk_offset": int,   # Alias zu chunk_id (Service-Schema)
-  "header":       str,   # Nächste Markdown-Überschrift
-  "domain":       str,   # Klassifizierungs-Label (lernen, trading, titan, …)
-  "run_id":       str,   # UUID des Ingest-Runs (für Upsert-before-Delete)
+  "text":         str,   # chunk text
+  "source":       str,   # file path (CLI ingest, legacy)
+  "source_path":  str,   # file path (service ingest, alias of source)
+  "chunk_id":     int,   # position in the document (0-based)
+  "chunk_offset": int,   # alias of chunk_id (service schema)
+  "header":       str,   # nearest Markdown heading
+  "domain":       str,   # classification label (lernen, trading, titan, …)
+  "run_id":       str,   # UUID of the ingest run (for upsert-before-delete)
 }
 ```
 
-Vektoren pro Chunk: `dense` (1024d COSINE), `sparse` (Lexical), `colbert` (1024d MULTI_SIM).
+Vectors per chunk: `dense` (1024d COSINE), `sparse` (lexical), `colbert` (1024d MULTI_SIM).
 
-### Qdrant Cache-Einträge (Epic 5B, Collection: `query_cache`)
+### Qdrant cache entries (Epic 5B, collection: `query_cache`)
 
 ```
 {
@@ -84,54 +85,56 @@ Vektoren pro Chunk: `dense` (1024d COSINE), `sparse` (Lexical), `colbert` (1024d
 
 ## External Services
 
-| Service | Verbindung | Zweck |
+| Service | Connection | Purpose |
 |---|---|---|
-| Qdrant | gRPC :6334 (lokal, Docker) | Vektor-Datenbank, Haupt-Collection + Cache-Collection |
-| Ollama | HTTP :11434 (lokal) | Phi-4 für Query-Decompose und Antwort-Generierung |
-| BGE-M3 | CUDA (VRAM, über FlagEmbedding) | Multi-Vektor-Embedding (dense + sparse + ColBERT) |
+| Qdrant | gRPC :6334 (local, Docker) | Vector database, main collection + cache collection |
+| Ollama | HTTP :11434 (local) | Phi-4 for query decompose and answer generation |
+| BGE-M3 | CUDA (VRAM, via FlagEmbedding) | Multi-vector embedding (dense + sparse + ColBERT) |
 
 ## Data Flow
 
-### CLI-Ingest (PDF)
+### CLI ingest (PDF)
 ```
 PDF → Docling (parse) → chunk_markdown() → late_chunk_embed(BGE-M3)
     → upsert_to_qdrant() → Qdrant
 ```
 
-### Service-Ingest (Markdown, POST /ingest/file)
+### Service ingest (Markdown, POST /ingest/file)
 ```
-.md file → read_markdown() [frontmatter parse, sanitize, indexed-check]
+.md file → read_markdown() [frontmatter parse, sanitize, indexed check]
          → late_chunk_and_embed(content, model=singleton)
-         → make_point() [mit run_id] → qdrant.upsert()
-         → qdrant.delete(alte Chunks mit anderem run_id)
+         → make_point() [with run_id] → qdrant.upsert()
+         → qdrant.delete(old chunks with a different run_id)
          → cache_invalidate(domain)
          → domain_counter update
 ```
 
-### Suche (POST /search)
+### Search (POST /search)
 ```
 query → decompose_query(Phi-4) → sub_queries[]
       → embed_query(BGE-M3) × n  → [dense, sparse, colbert] × n
-      → hybrid_search_with_rerank(Qdrant) × n  [Prefetch + ColBERT MaxSim]
-      → Epic-5B Cache lookup/write
-      → rrf_fusion() → top_k Chunks
+      → hybrid_search_with_rerank(Qdrant) × n  [prefetch + ColBERT MaxSim]
+      → Epic-5B cache lookup/write
+      → rrf_fusion() → top_k chunks
       → SearchResponse
 ```
 
-### Vollständige CLI-Pipeline
+### Full CLI pipeline
 ```
-python -m titan.search "Frage" --json | python -m titan.generate
+python -m titan.search "question" --json | python -m titan.generate
 ```
 
 ## Deployment
 
-**Lokal, WSL2, single workstation.**
+**Local, WSL2, single workstation.**
 
-- **titan-service:** systemd user-service (`~/.config/systemd/user/titan-service.service`)
-  Bindet auf `127.0.0.1:8765`. BGE-M3 dauerhaft im VRAM. GPU-Lock via fcntl.
-- **Qdrant:** Docker-Container, gRPC :6334
-- **Ollama:** Systemd-Service oder manuell, HTTP :11434
-- **brain-mcp (Phase 2):** Per-Session-Prozess, gestartet von Claude Desktop via stdio MCP.
-  Watcher als separater systemd user-service (`brain-watcher.service`).
+- **titan-service:** systemd user service (`~/.config/systemd/user/titan-service.service`)
+  Binds on `127.0.0.1:8765`. BGE-M3 permanently in VRAM. GPU lock via fcntl.
+- **Qdrant:** Docker container, gRPC :6334
+- **Ollama:** systemd service or manual, HTTP :11434
+- **brain-mcp (Phase 2):** serves the MCP tools to Claude — stdio (local) or, as
+  deployed, Streamable-HTTP exposed via Tailscale Funnel as a custom connector. The
+  vault watcher runs as a separate systemd user service (`brain-watcher.service`).
 
-**WSL2-Voraussetzung:** `/etc/wsl.conf` mit `[boot] systemd=true`.
+**WSL2 prerequisite:** `/etc/wsl.conf` with `[boot] systemd=true`.
+```
