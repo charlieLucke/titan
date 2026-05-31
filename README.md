@@ -50,7 +50,10 @@ uv run python -m titan.tools.init_col   # create the Qdrant collection
 
 Copy `.env.example` to `.env` and adjust `QDRANT_*`, `COLLECTION_NAME`,
 `OLLAMA_URL`/`OLLAMA_MODEL`, `INGEST_BASE_DIR`, `VAULT_ROOT`, and the cache
-settings as needed.
+settings as needed. `VAULT_ROOT` / `INGEST_BASE_DIR` can be any directory — the
+defaults in `.env.example` (`/mnt/f/...`) are **examples from the author's WSL2
+setup** (where `/mnt/f` is the Windows `F:` drive); on a native Linux box use paths
+under your home.
 
 ## Running the service
 
