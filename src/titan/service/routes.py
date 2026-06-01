@@ -4,14 +4,15 @@ routes.py – FastAPI Router mit allen Endpoints
 Wird von app.py via include_router eingebunden.
 
 Endpoints:
-    GET  /health          – Service-Status, BGE-M3 und Qdrant-Verfügbarkeit
-    POST /search          – Hybrid-Suche (A4)
-    POST /ingest/file     – Markdown-Datei indexieren (A6)
-    GET  /domains         – Alle Domains mit Chunk-Counts (A7)
-    POST /find_related    – Semantisch ähnliche Notes (A8)
-    DELETE /chunks        – Chunks einer Datei löschen (A9)
-    GET  /notes           – Alle indexierten Notes mit Chunk-Counts (A11)
-    GET  /stats           – Laufzeit-Metriken (Uptime, Counts, Cache, Latenz)
+    GET  /health                    – Service-Status, BGE-M3 und Qdrant-Verfügbarkeit
+    POST /search                    – Hybrid-Suche (A4)
+    POST /ingest/file               – Markdown-Datei indexieren (A6)
+    GET  /domains                   – Alle Domains mit Chunk-Counts (A7)
+    POST /find_related              – Semantisch ähnliche Notes (A8)
+    DELETE /chunks                  – Chunks einer Datei löschen (A9)
+    GET  /notes                     – Alle indexierten Notes mit Chunk-Counts (A11)
+    GET  /domains/{domain}/notes    – Notes einer einzelnen Domain (A12)
+    GET  /stats                     – Laufzeit-Metriken (Uptime, Counts, Cache, Latenz)
 """
 
 from __future__ import annotations
@@ -447,6 +448,52 @@ async def list_notes() -> NotesResponse:
     while True:
         records, offset = state.qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
+            limit=256,
+            offset=offset,
+            with_payload=["source_path", "domain"],
+            with_vectors=False,
+        )
+        for record in records:
+            payload = record.payload or {}
+            source_path = str(payload.get("source_path", ""))
+            if not source_path:
+                continue
+            counts[source_path] = counts.get(source_path, 0) + 1
+            domains.setdefault(source_path, str(payload.get("domain", "")))
+        if offset is None:
+            break
+
+    notes = [
+        NoteInfo(source_path=sp, domain=domains[sp], chunk_count=counts[sp])
+        for sp in sorted(counts)
+    ]
+    return NotesResponse(notes=notes, total=len(notes))
+
+
+# ─── Domain Notes (A12) ──────────────────────────────────────────────────────
+
+
+@router.get("/domains/{domain}/notes", response_model=NotesResponse)
+async def list_domain_notes(domain: str) -> NotesResponse:
+    """Listet alle Notes der angegebenen Domain, gruppiert nach source_path.
+
+    Filtert die Collection via Qdrant scroll_filter auf das domain-Payload-Feld.
+    Unbekannte / leere Domains geben 200 mit notes=[], total=0 zurück (kein 404).
+    """
+    if state.qdrant_client is None:
+        raise HTTPException(503, "Service nicht bereit")
+
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+    counts: dict[str, int] = {}
+    domains: dict[str, str] = {}
+    offset = None
+    while True:
+        records, offset = state.qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="domain", match=MatchValue(value=domain))]
+            ),
             limit=256,
             offset=offset,
             with_payload=["source_path", "domain"],

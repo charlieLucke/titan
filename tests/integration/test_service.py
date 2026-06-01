@@ -531,3 +531,44 @@ def test_notes_excludes_deleted_note(app_client: TestClient, tmp_vault: Path) ->
     assert resp.status_code == 200
     paths = [n["source_path"] for n in resp.json()["notes"]]
     assert str(note) not in paths
+
+
+# ─── Domain Notes ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_domain_notes_isolation(app_client: TestClient, tmp_vault: Path) -> None:
+    """GET /domains/<A>/notes gibt nur Notes aus Domain A zurück, nicht aus Domain B."""
+    note_a = tmp_vault / "domain_notes_a.md"
+    note_a.write_text("---\ndomain: dn_alpha\n---\nContent Domain A. MU1001.")
+    note_b = tmp_vault / "domain_notes_b.md"
+    note_b.write_text("---\ndomain: dn_beta\n---\nContent Domain B. NU2002.")
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        ingest_a = app_client.post("/ingest/file", json={"file_path": str(note_a)})
+        ingest_b = app_client.post("/ingest/file", json={"file_path": str(note_b)})
+
+    assert ingest_a.status_code == 200
+    assert ingest_b.status_code == 200
+
+    resp = app_client.get("/domains/dn_alpha/notes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["total"] == len(data["notes"])
+    for note in data["notes"]:
+        assert note["domain"] == "dn_alpha", f"Domain-Leck: {note}"
+    # The note from domain A must be present
+    paths = [n["source_path"] for n in data["notes"]]
+    assert str(note_a) in paths
+    # The note from domain B must NOT be present
+    assert str(note_b) not in paths
+
+
+@pytest.mark.integration
+def test_domain_notes_unknown(app_client: TestClient) -> None:
+    """GET /domains/zzz/notes für unbekannte Domain → 200, notes=[], total=0."""
+    resp = app_client.get("/domains/zzz_nonexistent/notes")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["notes"] == []
+    assert data["total"] == 0
