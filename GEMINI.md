@@ -14,6 +14,7 @@ LLMs are probabilistic; codebases require consistency. This system bridges that 
 2. `docs/ai/CURRENT_TASK.md` — what is active right now
 3. `docs/ai/HANDOFF.md` — if resuming an interrupted session, start here
 4. The relevant plan in `docs/ai/plans/` if the task references one
+5. `docs/ai/SYSTEM_LINK.md` — if this repo is part of a larger system, read it first
 
 If any of these files are missing or empty, ask the user before guessing.
 
