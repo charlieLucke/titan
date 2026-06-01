@@ -53,7 +53,16 @@
       re-embed); a snapshot is cheap insurance against corruption, a bad migration, or
       a lost container volume. Effort: Low.
 
-- [ ] **2026-05-31: `/stats` endpoint + lightweight metrics.** Expose cache hit rate,
-      p50/p95 search latency, collection size, chunk count and last-ingest time. Cheap
-      observability the brain-dashboard can surface directly, and a baseline for judging
-      the impact of the reranker / contextual-retrieval ideas above. Effort: Low.
+- [x] **2026-05-31: `/stats` endpoint + lightweight metrics.** ✅ Umgesetzt
+      (`GET /stats`): uptime, total chunks + domain count, cache hit rate, recent
+      search-latency p50/p95/max, cache entry count, last-ingest age. In-memory
+      counters in `ServiceState`, pure assembly in `service/stats.py`.
+
+- [ ] **2026-05-31: Multi-collection / namespaces (the lean multi-user path).** A
+      `collection`/`namespace` request param so distinct contexts (e.g. personal vs.
+      work, or per project) get isolated search while sharing the one BGE-M3 model.
+      Gives ~80% of the practical benefit of multi-user (data separation) at ~10% of
+      the cost — no per-user auth, TLS, or GPU-concurrency rework, and it keeps the
+      single-user `127.0.0.1` design intact. True multi-tenant (multiple people,
+      isolated + authenticated) stays out of scope: front titan with a gateway then,
+      rather than baking tenancy into it. Effort: Medium.
