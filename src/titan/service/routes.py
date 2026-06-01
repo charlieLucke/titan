@@ -11,6 +11,7 @@ Endpoints:
     POST /find_related    – Semantisch ähnliche Notes (A8)
     DELETE /chunks        – Chunks einer Datei löschen (A9)
     GET  /notes           – Alle indexierten Notes mit Chunk-Counts (A11)
+    GET  /stats           – Laufzeit-Metriken (Uptime, Counts, Cache, Latenz)
 """
 
 from __future__ import annotations
@@ -39,8 +40,10 @@ from titan.service.schemas import (
     NotesResponse,
     SearchRequest,
     SearchResponse,
+    StatsResponse,
 )
 from titan.service.state import state
+from titan.service.stats import build_stats
 
 VAULT_ROOT = Path(os.getenv("VAULT_ROOT", "/mnt/f/vault")).resolve()
 
@@ -86,6 +89,46 @@ async def health() -> HealthResponse:
     )
 
 
+# ─── Stats ───────────────────────────────────────────────────────────────────
+
+
+@router.get("/stats", response_model=StatsResponse)
+async def stats() -> StatsResponse:
+    """Laufzeit-Metriken: Uptime, Chunk-/Domain-Counts, Cache-Hit-Rate, Such-Latenz.
+
+    Bewusst ohne 503-Guard — der Endpoint antwortet auch im degraded-Zustand (dann
+    mit Nullwerten / cache_entries=None). Zähler sind in-memory und resetten bei
+    jedem Neustart.
+    """
+    now = time.monotonic()
+
+    # lazy import vermeidet Circular-Import und nutzt dieselbe Cache-Konfiguration
+    from titan.search import CACHE_COLLECTION_NAME, CACHE_ENABLED
+
+    cache_entries: int | None = None
+    if CACHE_ENABLED and state.qdrant_client is not None:
+        with contextlib.suppress(Exception):
+            cache_entries = int(
+                state.qdrant_client.count(collection_name=CACHE_COLLECTION_NAME, exact=True).count
+            )
+
+    last_ingest_age: int | None = (
+        int(now - state.last_ingest_at) if state.last_ingest_at is not None else None
+    )
+
+    return build_stats(
+        uptime_seconds=int(now - state.started_at),
+        collection_name=COLLECTION_NAME,
+        domain_counts=state.domain_counts,
+        search_count=state.search_count,
+        cache_hit_count=state.cache_hit_count,
+        latencies=list(state.search_latencies_ms),
+        cache_enabled=CACHE_ENABLED,
+        cache_entries=cache_entries,
+        last_ingest_age_seconds=last_ingest_age,
+    )
+
+
 # ─── Search (A4) ────────────────────────────────────────────────────────────
 
 
@@ -108,6 +151,12 @@ async def search_endpoint(req: SearchRequest) -> SearchResponse:
         qdrant_client=state.qdrant_client,
     )
     latency_ms = int((time.perf_counter() - t0) * 1000)
+
+    # Observability: record for GET /stats (in-memory, best-effort).
+    state.search_count += 1
+    if result.get("cache_hit", False):
+        state.cache_hit_count += 1
+    state.search_latencies_ms.append(latency_ms)
 
     chunks = [
         Chunk(
@@ -259,6 +308,8 @@ async def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
     from titan.search import invalidate_domain_cache
 
     invalidate_domain_cache(state.qdrant_client, domain)
+
+    state.last_ingest_at = time.monotonic()  # for GET /stats "last ingest age"
 
     return IngestResponse(
         file_path=str(file_path),

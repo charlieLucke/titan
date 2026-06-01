@@ -110,3 +110,27 @@ class NoteInfo(BaseModel):
 class NotesResponse(BaseModel):
     notes: list[NoteInfo]  # alphabetisch nach source_path sortiert
     total: int
+
+
+# ─── Stats ───────────────────────────────────────────────────────────────────
+
+
+class LatencyStats(BaseModel):
+    count: int  # number of samples in the in-memory window
+    p50_ms: int | None
+    p95_ms: int | None
+    max_ms: int | None
+
+
+class StatsResponse(BaseModel):
+    uptime_seconds: int
+    collection_name: str
+    total_chunks: int  # sum over all domains
+    domain_count: int
+    searches_total: int  # since startup
+    cache_hits: int
+    cache_hit_rate: float  # 0.0–1.0; 0.0 when no searches yet
+    search_latency: LatencyStats  # over the recent in-memory window
+    cache_enabled: bool
+    cache_entries: int | None  # None if cache disabled or Qdrant unreachable
+    last_ingest_age_seconds: int | None  # None if no ingest since startup
