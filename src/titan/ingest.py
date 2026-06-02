@@ -783,16 +783,18 @@ def make_point(
     file_path: Path,
     domain: str,
     run_id: str,
+    content_hash: str,
 ) -> Any:
     """Erstellt ein Qdrant-PointStruct aus einem embedded Chunk.
 
-    Setzt source_path, domain und run_id im Payload (für Upsert-before-Delete).
+    Setzt source_path, domain, run_id und content_hash im Payload.
 
     Args:
-        chunk:     Chunk-Dict mit dense/sparse/colbert-Vektoren.
-        file_path: Absoluter Pfad der ingestierten Datei (source_path im Payload).
-        domain:    Domain-Label.
-        run_id:    UUID dieses Ingest-Runs (für Upsert-before-Delete-Pattern).
+        chunk:        Chunk-Dict mit dense/sparse/colbert-Vektoren.
+        file_path:    Absoluter Pfad der ingestierten Datei (source_path im Payload).
+        domain:       Domain-Label.
+        run_id:       UUID dieses Ingest-Runs (für Upsert-before-Delete-Pattern).
+        content_hash: sha256-Hex-Digest der rohen Datei-Bytes (für Vault-Reconcile).
 
     Returns:
         PointStruct bereit für qdrant_client.upsert().
@@ -824,6 +826,7 @@ def make_point(
             "header": chunk.get("header", ""),
             "domain": domain,
             "run_id": run_id,
+            "content_hash": content_hash,
         },
     )
 

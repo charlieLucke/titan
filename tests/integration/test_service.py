@@ -572,3 +572,90 @@ def test_domain_notes_unknown(app_client: TestClient) -> None:
     data = resp.json()
     assert data["notes"] == []
     assert data["total"] == 0
+
+
+# ─── Content Hash ─────────────────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_notes_include_content_hash(app_client: TestClient, tmp_vault: Path) -> None:
+    """GET /notes nach Ingest → content_hash ist ein 64-Zeichen-Hex-String, der dem
+    sha256 der rohen Datei-Bytes entspricht."""
+    import hashlib
+
+    note = tmp_vault / "hash_check.md"
+    note.write_text(
+        textwrap.dedent("""\
+            ---
+            domain: hash_test
+            ---
+            # Hash-Test
+            Inhalt für den content_hash-Test. Unique-HASH-XI5050.
+        """)
+    )
+    expected_hash = hashlib.sha256(note.read_bytes()).hexdigest()
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        ingest_resp = app_client.post("/ingest/file", json={"file_path": str(note)})
+        assert ingest_resp.status_code == 200, ingest_resp.text
+
+        resp = app_client.get("/notes")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    entry = next((n for n in data["notes"] if n["source_path"] == str(note)), None)
+    assert entry is not None, "ingestete Note fehlt in /notes"
+    assert entry["content_hash"] is not None, "content_hash sollte nicht null sein"
+    assert len(entry["content_hash"]) == 64, "content_hash muss ein 64-Zeichen-Hex-Digest sein"
+    assert entry["content_hash"] == expected_hash, "content_hash stimmt nicht mit sha256 überein"
+
+
+@pytest.mark.integration
+def test_content_hash_changes_on_edit(app_client: TestClient, tmp_vault: Path) -> None:
+    """content_hash ändert sich nach einer Bearbeitung der Note."""
+    import hashlib
+
+    note = tmp_vault / "hash_edit.md"
+    note.write_text(
+        textwrap.dedent("""\
+            ---
+            domain: hash_test
+            ---
+            # Hash-Edit-Test v1
+            Erster Inhalt. Unique-HASH-OMICRON6060.
+        """)
+    )
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        resp1 = app_client.post("/ingest/file", json={"file_path": str(note)})
+    assert resp1.status_code == 200, resp1.text
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        notes_resp1 = app_client.get("/notes")
+    entry1 = next((n for n in notes_resp1.json()["notes"] if n["source_path"] == str(note)), None)
+    assert entry1 is not None
+    hash_before = entry1["content_hash"]
+    assert hash_before == hashlib.sha256(note.read_bytes()).hexdigest()
+
+    # Inhalt ändern → neuer Hash erwartet
+    note.write_text(
+        textwrap.dedent("""\
+            ---
+            domain: hash_test
+            ---
+            # Hash-Edit-Test v2
+            Geänderter Inhalt. Unique-HASH-OMICRON6060-V2.
+        """)
+    )
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        resp2 = app_client.post("/ingest/file", json={"file_path": str(note)})
+    assert resp2.status_code == 200, resp2.text
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        notes_resp2 = app_client.get("/notes")
+    entry2 = next((n for n in notes_resp2.json()["notes"] if n["source_path"] == str(note)), None)
+    assert entry2 is not None
+    hash_after = entry2["content_hash"]
+    assert hash_after == hashlib.sha256(note.read_bytes()).hexdigest()
+    assert hash_before != hash_after, "content_hash muss sich nach einer Inhaltsänderung ändern"

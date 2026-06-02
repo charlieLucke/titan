@@ -105,6 +105,7 @@ class NoteInfo(BaseModel):
     source_path: str
     domain: str
     chunk_count: int
+    content_hash: str | None = None  # sha256 of the note's raw bytes; null for legacy/PDF chunks
 
 
 class NotesResponse(BaseModel):

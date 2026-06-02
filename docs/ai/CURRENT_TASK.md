@@ -12,6 +12,9 @@ System in production. Ongoing build-out around titan + brain-mcp.
 - [x] Claude integration live (brain-mcp HTTP + OAuth + Tailscale Funnel)
 - [x] 2026-05-17: added `GET /notes` (for brain-mcp `list_notes`)
 - [x] 2026-05-17: repaired the integration suite (version drift, 19/20 green)
+- [/] 2026-06-02: Stage 1 — `content_hash` on ingest + `/notes` + `/domains/{domain}/notes`
+      Workspace plan: `docs/ai/plans/2026-06-02_vault-index-startup-reconcile.md`
+      Implementation: Sonnet. Status: make check pending.
 
 ## Open
 

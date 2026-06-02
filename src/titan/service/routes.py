@@ -18,6 +18,7 @@ Endpoints:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import logging
 import os
 import time
@@ -276,6 +277,9 @@ async def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
 
     domain: str = meta["domain"]
 
+    # Compute content hash once per ingest (before chunking/embedding — same raw bytes).
+    content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
     # A6: Upsert-before-Delete mit run_id
     run_id = str(uuid.uuid4())
 
@@ -288,7 +292,9 @@ async def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
 
     from qdrant_client.models import PointStruct
 
-    points: list[PointStruct] = [make_point(c, file_path, domain, run_id) for c in new_chunks]
+    points: list[PointStruct] = [
+        make_point(c, file_path, domain, run_id, content_hash) for c in new_chunks
+    ]
     state.qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
 
     # Delete old chunks (different run_id) for the same file.
@@ -444,13 +450,14 @@ async def list_notes() -> NotesResponse:
 
     counts: dict[str, int] = {}
     domains: dict[str, str] = {}
+    hashes: dict[str, str | None] = {}
     offset = None
     while True:
         records, offset = state.qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
             limit=256,
             offset=offset,
-            with_payload=["source_path", "domain"],
+            with_payload=["source_path", "domain", "content_hash"],
             with_vectors=False,
         )
         for record in records:
@@ -460,11 +467,14 @@ async def list_notes() -> NotesResponse:
                 continue
             counts[source_path] = counts.get(source_path, 0) + 1
             domains.setdefault(source_path, str(payload.get("domain", "")))
+            hashes.setdefault(source_path, payload.get("content_hash"))
         if offset is None:
             break
 
     notes = [
-        NoteInfo(source_path=sp, domain=domains[sp], chunk_count=counts[sp])
+        NoteInfo(
+            source_path=sp, domain=domains[sp], chunk_count=counts[sp], content_hash=hashes[sp]
+        )
         for sp in sorted(counts)
     ]
     return NotesResponse(notes=notes, total=len(notes))
@@ -487,6 +497,7 @@ async def list_domain_notes(domain: str) -> NotesResponse:
 
     counts: dict[str, int] = {}
     domains: dict[str, str] = {}
+    hashes: dict[str, str | None] = {}
     offset = None
     while True:
         records, offset = state.qdrant_client.scroll(
@@ -496,7 +507,7 @@ async def list_domain_notes(domain: str) -> NotesResponse:
             ),
             limit=256,
             offset=offset,
-            with_payload=["source_path", "domain"],
+            with_payload=["source_path", "domain", "content_hash"],
             with_vectors=False,
         )
         for record in records:
@@ -506,11 +517,14 @@ async def list_domain_notes(domain: str) -> NotesResponse:
                 continue
             counts[source_path] = counts.get(source_path, 0) + 1
             domains.setdefault(source_path, str(payload.get("domain", "")))
+            hashes.setdefault(source_path, payload.get("content_hash"))
         if offset is None:
             break
 
     notes = [
-        NoteInfo(source_path=sp, domain=domains[sp], chunk_count=counts[sp])
+        NoteInfo(
+            source_path=sp, domain=domains[sp], chunk_count=counts[sp], content_hash=hashes[sp]
+        )
         for sp in sorted(counts)
     ]
     return NotesResponse(notes=notes, total=len(notes))
