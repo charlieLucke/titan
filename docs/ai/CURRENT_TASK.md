@@ -12,9 +12,10 @@ System in production. Ongoing build-out around titan + brain-mcp.
 - [x] Claude integration live (brain-mcp HTTP + OAuth + Tailscale Funnel)
 - [x] 2026-05-17: added `GET /notes` (for brain-mcp `list_notes`)
 - [x] 2026-05-17: repaired the integration suite (version drift, 19/20 green)
-- [/] 2026-06-02: Stage 1 — `content_hash` on ingest + `/notes` + `/domains/{domain}/notes`
+- [x] 2026-06-02: Stage 1 — `content_hash` on ingest + `/notes` + `/domains/{domain}/notes`
       Workspace plan: `docs/ai/plans/2026-06-02_vault-index-startup-reconcile.md`
-      Implementation: Sonnet. Status: make check pending.
+      Committed: `149a47c` (titan feat) + `b208bd0` (workspace docs)
+      Quality gate: 40/40 tests green (incl. 2 new integration tests); `./workspace.sh check` green.
 
 ## Open
 
