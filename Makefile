@@ -1,4 +1,4 @@
-.PHONY: help install dev test test-fast lint format typecheck check clean run pre-commit
+.PHONY: help install dev test test-fast lint format format-check typecheck check clean run pre-commit
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -24,10 +24,13 @@ format:  ## Auto-format and auto-fix lint issues
 	uv run ruff format .
 	uv run ruff check --fix .
 
+format-check:  ## Check formatting without changes (mirrors CI)
+	uv run ruff format --check .
+
 typecheck:  ## Run mypy strict type checker
 	uv run mypy src tests
 
-check: lint typecheck test  ## Run full quality gate (lint + types + tests)
+check: format-check lint typecheck test  ## Run full quality gate (format + lint + types + tests)
 
 pre-commit:  ## Run all pre-commit hooks on all files
 	uv run pre-commit run --all-files
