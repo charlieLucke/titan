@@ -311,6 +311,27 @@ def test_ingest_outside_vault(app_client: TestClient, tmp_path: Path) -> None:
 
 
 @pytest.mark.integration
+def test_ingest_missing_domain_422(app_client: TestClient, tmp_vault: Path) -> None:
+    """POST /ingest/file ohne 'domain'-Frontmatter → 422 (Client-Fehler, kein 500)."""
+    note = tmp_vault / "no_domain.md"
+    note.write_text(
+        textwrap.dedent("""\
+            ---
+            created: 2026-06-12
+            ---
+            # Ohne Domain
+            Dieser Note fehlt das Pflichtfeld domain.
+        """)
+    )
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        resp = app_client.post("/ingest/file", json={"file_path": str(note)})
+
+    assert resp.status_code == 422
+    assert "domain" in resp.json()["detail"]
+
+
+@pytest.mark.integration
 def test_ingest_pdf_rejected(app_client: TestClient, tmp_vault: Path) -> None:
     """POST /ingest/file mit .pdf → 400 (PDFs via CLI)."""
     pdf = tmp_vault / "test.pdf"

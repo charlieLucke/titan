@@ -7,6 +7,7 @@ Wird im Lifespan von app.py befüllt und freigegeben.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections import Counter, deque
 from typing import Any
@@ -19,6 +20,12 @@ class ServiceState:
         self.bge_model: Any | None = None
         self.qdrant_client: Any | None = None
         self.gpu_lock: Any | None = None
+        # Serialisiert GPU-Arbeit und Index-Mutationen. Die Routes laufen als
+        # Sync-Handler im FastAPI-Threadpool (sonst blockiert die GPU-Arbeit den
+        # Event-Loop und /health hängt während eines Ingests); ohne dieses Lock
+        # könnten zwei parallele Ingests derselben Datei sich über das
+        # run_id-Delete gegenseitig die frischen Chunks löschen.
+        self.work_lock: threading.Lock = threading.Lock()
         # Domain-Counter: {domain: chunk_count} – inkrementell aktualisiert,
         # beim Start via Voll-Scan initialisiert (Task A7).
         self.domain_counts: Counter[str] = Counter()

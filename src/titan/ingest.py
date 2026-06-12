@@ -34,6 +34,7 @@ import logging
 import os
 import re
 import sys
+import uuid
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -41,7 +42,7 @@ from typing import Any
 import torch
 from dotenv import load_dotenv
 
-from titan.utils import acquire_gpu_lock, stable_uuid
+from titan.utils import acquire_gpu_lock
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -135,17 +136,16 @@ def parse_pdfs_parallel(pdf_paths: list[Path]) -> list[tuple[Path, str]]:
     results: list[tuple[Path, str]] = []
     with ProcessPoolExecutor(max_workers=workers) as pool:
         future_map = {pool.submit(_parse_single_pdf, p): p for p in pdf_paths}
-        for future in as_completed(future_map, timeout=300):
+        # Kein Timeout auf as_completed: der Gesamt-Timeout wirft beim ITERIEREN
+        # und würde den restlichen Batch (inkl. bereits fertiger Ergebnisse)
+        # verwerfen, sobald der ganze Lauf länger dauert. Ein Per-PDF-Timeout ist
+        # mit ProcessPool nicht sauber möglich (cancel() wirkt nicht auf laufende
+        # Worker) — ein hängendes PDF blockiert nur seinen eigenen Worker-Slot.
+        for future in as_completed(future_map):
             source_path = future_map[future]
             try:
-                path, md = future.result(timeout=120)
+                path, md = future.result()
                 results.append((path, md))
-            except TimeoutError:
-                log.error(
-                    "Docling-Timeout (>120s): %s – übersprungen. Korruptes oder großes PDF?",
-                    source_path.name,
-                )
-                future.cancel()
             except Exception:
                 log.error("Parsing fehlgeschlagen: %s", source_path.name, exc_info=True)
 
@@ -660,56 +660,60 @@ def build_qdrant_client() -> Any:
     return client
 
 
-def upsert_to_qdrant(client: Any, chunks: list[dict[str, Any]], domain: str) -> None:
-    """Sendet alle Chunks mit Dense-, Sparse- und ColBERT-Vektoren an Qdrant.
+def upsert_files_to_qdrant(
+    client: Any,
+    files_with_chunks: list[tuple[Path, list[dict[str, Any]]]],
+    domain: str,
+) -> None:
+    """Schreibt Chunks pro Quelldatei nach Qdrant — gleiches Payload-Schema wie der Service.
 
-    Nutzt Batch-Upserts für maximalen Durchsatz via gRPC.
-    Das domain-Tag wird als Payload gespeichert für FieldCondition-Filter (Epic 1A).
+    Nutzt make_point() (source_path, run_id, content_hash) statt eines eigenen
+    CLI-Payloads: zwei Schemata in einer Collection führten dazu, dass
+    PDF-Chunks in /notes unsichtbar und per DELETE /chunks unlöschbar waren.
+
+    Upsert-before-Delete mit run_id wie in POST /ingest/file: erst die neuen
+    Punkte upserten, dann alle Punkte derselben Datei mit fremder run_id
+    löschen. Das räumt Orphans auf, wenn ein Re-Ingest weniger Chunks erzeugt,
+    und entfernt Altbestände des früheren CLI-Schemas (Payload mit
+    source=Dateiname, ohne run_id).
 
     Args:
         client: QdrantClient-Instanz.
-        chunks: Chunks mit dense, sparse, colbert Vektoren.
+        files_with_chunks: Pro Quelldatei die embeddeten Chunks.
         domain: Domain-Label für alle Chunks dieses Ingests.
     """
-    from qdrant_client.models import PointStruct, SparseVector
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-    points = []
-    for chunk in chunks:
-        sparse_raw: dict[str, Any] = chunk["sparse"]
-        # int(float(k)): FlagEmbedding gibt Keys manchmal als "1024.0" zurück
-        sparse_vec = SparseVector(
-            indices=[int(float(k)) for k in sparse_raw],
-            values=[float(v) for v in sparse_raw.values()],
+    for file_path, chunks in files_with_chunks:
+        run_id = str(uuid.uuid4())
+        content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        points = [make_point(c, file_path, domain, run_id, content_hash) for c in chunks]
+
+        total = len(points)
+        n_batches = (total + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
+        log.info(
+            "Starte Qdrant-Upsert: %s – %d Punkte, %d Batch(es)", file_path.name, total, n_batches
         )
+        for i in range(n_batches):
+            batch = points[i * EMBED_BATCH_SIZE : (i + 1) * EMBED_BATCH_SIZE]
+            client.upsert(collection_name=COLLECTION_NAME, points=batch)
+            log.info("  Upsert Batch %d/%d OK (%d Punkte)", i + 1, n_batches, len(batch))
 
-        points.append(
-            PointStruct(
-                id=stable_uuid(chunk["source"], chunk["chunk_id"]),
-                vector={
-                    "dense": chunk["dense"],
-                    "sparse": sparse_vec,
-                    "colbert": chunk["colbert"],
-                },
-                payload={
-                    "text": chunk["text"],
-                    "source": chunk["source"],
-                    "chunk_id": chunk["chunk_id"],
-                    "header": chunk.get("header", ""),
-                    "domain": domain,
-                },
+        # Stale Chunks dieser Datei löschen: aktuelles Schema (source_path) und
+        # Legacy-CLI-Schema (source=Dateiname). must_not auf run_id matcht auch
+        # Punkte ohne run_id-Feld — Legacy-Punkte werden damit miterfasst.
+        for key, value in (("source_path", str(file_path)), ("source", file_path.name)):
+            client.delete(
+                collection_name=COLLECTION_NAME,
+                points_selector=Filter(
+                    must=[FieldCondition(key=key, match=MatchValue(value=value))],
+                    must_not=[FieldCondition(key="run_id", match=MatchValue(value=run_id))],
+                ),
             )
+
+        log.info(
+            "Upsert abgeschlossen: %s → %d Punkte in '%s'", file_path.name, total, COLLECTION_NAME
         )
-
-    total = len(points)
-    n_batches = (total + EMBED_BATCH_SIZE - 1) // EMBED_BATCH_SIZE
-    log.info("Starte Qdrant-Upsert: %d Punkte, %d Batch(es)", total, n_batches)
-
-    for i in range(n_batches):
-        batch = points[i * EMBED_BATCH_SIZE : (i + 1) * EMBED_BATCH_SIZE]
-        client.upsert(collection_name=COLLECTION_NAME, points=batch)
-        log.info("  Upsert Batch %d/%d OK (%d Punkte)", i + 1, n_batches, len(batch))
-
-    log.info("Upsert abgeschlossen: %d Punkte in '%s'", total, COLLECTION_NAME)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -905,11 +909,14 @@ def main() -> None:
         log.error("Kein Dokument erfolgreich geparst. Abbruch.")
         sys.exit(1)
 
-    # ── Phase 2b: Header-basiertes Chunking ───────────────────────────────────
+    # ── Phase 2b: Header-basiertes Chunking (Datei-Zuordnung für run_id-Delete) ──
+    files_with_chunks: list[tuple[Path, list[dict[str, Any]]]] = []
     all_chunks: list[dict[str, Any]] = []
     for path, markdown in parsed:
         chunks = chunk_markdown(markdown, path)
-        all_chunks.extend(chunks)
+        if chunks:
+            files_with_chunks.append((path, chunks))
+            all_chunks.extend(chunks)
 
     log.info("Chunking gesamt: %d Chunks aus %d Dokument(en)", len(all_chunks), len(parsed))
     if not all_chunks:
@@ -927,11 +934,13 @@ def main() -> None:
     model = load_bge_m3_model()
 
     # ── Phase 3b: Late-Chunking-Embedding (Epic 3) ────────────────────────────
-    all_chunks = late_chunk_embed(model, all_chunks)
+    # late_chunk_embed mutiert die Chunk-Dicts in-place — die Datei-Zuordnung
+    # in files_with_chunks bleibt dadurch gültig.
+    late_chunk_embed(model, all_chunks)
 
     # ── Phase 3c: Upsert in Qdrant via gRPC ──────────────────────────────────
     client = build_qdrant_client()
-    upsert_to_qdrant(client, all_chunks, domain=args.domain)
+    upsert_files_to_qdrant(client, files_with_chunks, domain=args.domain)
 
     log.info("Pipeline Phase 2, 3 & Epic 3 erfolgreich abgeschlossen.")
 

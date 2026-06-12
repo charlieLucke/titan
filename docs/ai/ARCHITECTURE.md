@@ -96,7 +96,7 @@ Vectors per chunk: `dense` (1024d COSINE), `sparse` (lexical), `colbert` (1024d 
 ### CLI ingest (PDF)
 ```
 PDF → Docling (parse) → chunk_markdown() → late_chunk_embed(BGE-M3)
-    → upsert_to_qdrant() → Qdrant
+    → upsert_files_to_qdrant() → Qdrant (gleiches Payload-Schema wie Service: source_path, run_id, content_hash)
 ```
 
 ### Service ingest (Markdown, POST /ingest/file)

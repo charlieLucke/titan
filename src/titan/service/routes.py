@@ -60,8 +60,14 @@ router = APIRouter()
 
 
 @router.get("/health", response_model=HealthResponse)
-async def health() -> HealthResponse:
-    """Service-Status: BGE-M3 geladen, Qdrant erreichbar, VRAM-Nutzung."""
+def health() -> HealthResponse:
+    """Service-Status: BGE-M3 geladen, Qdrant erreichbar, VRAM-Nutzung.
+
+    Alle Handler in diesem Router sind bewusst sync (def): FastAPI führt sie im
+    Threadpool aus. Als async def würde der synchrone GPU-/Ollama-/Qdrant-Code
+    den Event-Loop blockieren — während eines Ingests wäre der ganze Service
+    (inkl. /health) unerreichbar.
+    """
     bge_loaded = state.bge_model is not None
 
     qdrant_reachable = False
@@ -95,7 +101,7 @@ async def health() -> HealthResponse:
 
 
 @router.get("/stats", response_model=StatsResponse)
-async def stats() -> StatsResponse:
+def stats() -> StatsResponse:
     """Laufzeit-Metriken: Uptime, Chunk-/Domain-Counts, Cache-Hit-Rate, Such-Latenz.
 
     Bewusst ohne 503-Guard — der Endpoint antwortet auch im degraded-Zustand (dann
@@ -135,30 +141,35 @@ async def stats() -> StatsResponse:
 
 
 @router.post("/search", response_model=SearchResponse)
-async def search_endpoint(req: SearchRequest) -> SearchResponse:
-    """Hybrid-Suche: Query-Decompose → BGE-M3 → RRF → (Epic-5B Cache)."""
+def search_endpoint(req: SearchRequest) -> SearchResponse:
+    """Hybrid-Suche: Query-Decompose → BGE-M3 → RRF → (Epic-5B Cache).
+
+    work_lock serialisiert die GPU-Nutzung gegen parallele Requests und Ingests;
+    latency_ms enthält damit auch die Wartezeit auf das Lock (Caller-Sicht).
+    """
     if state.bge_model is None or state.qdrant_client is None:
         raise HTTPException(503, "Service nicht bereit (BGE-M3 oder Qdrant nicht geladen)")
 
     from titan.search import search  # lokaler Import vermeidet Circular-Import-Risiko
 
     t0 = time.perf_counter()
-    result = search(
-        query=req.query,
-        domain=req.domain,
-        top_k=req.top_k,
-        use_decompose=req.use_decompose,
-        use_cache=req.use_cache,
-        model=state.bge_model,
-        qdrant_client=state.qdrant_client,
-    )
-    latency_ms = int((time.perf_counter() - t0) * 1000)
+    with state.work_lock:
+        result = search(
+            query=req.query,
+            domain=req.domain,
+            top_k=req.top_k,
+            use_decompose=req.use_decompose,
+            use_cache=req.use_cache,
+            model=state.bge_model,
+            qdrant_client=state.qdrant_client,
+        )
+        latency_ms = int((time.perf_counter() - t0) * 1000)
 
-    # Observability: record for GET /stats (in-memory, best-effort).
-    state.search_count += 1
-    if result.get("cache_hit", False):
-        state.cache_hit_count += 1
-    state.search_latencies_ms.append(latency_ms)
+        # Observability: record for GET /stats (in-memory, best-effort).
+        state.search_count += 1
+        if result.get("cache_hit", False):
+            state.cache_hit_count += 1
+        state.search_latencies_ms.append(latency_ms)
 
     chunks = [
         Chunk(
@@ -188,7 +199,7 @@ async def search_endpoint(req: SearchRequest) -> SearchResponse:
 
 
 @router.get("/domains", response_model=DomainsResponse)
-async def list_domains() -> DomainsResponse:
+def list_domains() -> DomainsResponse:
     """Alle Domains im Index mit Chunk-Counts (aus in-memory Counter)."""
     domains = sorted(state.domain_counts.keys())
     return DomainsResponse(
@@ -232,8 +243,13 @@ def _count_chunks_for_path(file_path: Path) -> int:
 
 
 @router.post("/ingest/file", response_model=IngestResponse)
-async def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
-    """Indexiert eine Markdown-Datei (Upsert-before-Delete mit run_id)."""
+def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
+    """Indexiert eine Markdown-Datei (Upsert-before-Delete mit run_id).
+
+    work_lock umschließt Embedding (GPU) und die Upsert/Delete/Counter-Sequenz:
+    zwei verzahnte Ingests derselben Datei würden sich sonst über das
+    run_id-Delete gegenseitig die frischen Chunks löschen.
+    """
     if state.bge_model is None or state.qdrant_client is None:
         raise HTTPException(503, "Service nicht bereit")
 
@@ -248,75 +264,87 @@ async def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         raise HTTPException(404, f"Datei nicht gefunden: {file_path}")
 
     # A5: Markdown lesen + Frontmatter
+    import yaml
+
     from titan.ingest import read_markdown  # lazy import
 
-    content, meta = read_markdown(file_path)
+    try:
+        content, meta = read_markdown(file_path)
+    except ValueError as exc:
+        # z.B. fehlendes/leeres 'domain'-Frontmatter: Client-Fehler, kein 500 —
+        # der Watcher behandelt 4xx als permanent und requeued nicht sinnlos.
+        raise HTTPException(422, str(exc)) from exc
+    except yaml.YAMLError as exc:
+        raise HTTPException(422, f"Ungültiges YAML-Frontmatter in {file_path}: {exc}") from exc
 
-    # indexed:false → alte Chunks löschen, kein Neu-Ingest
-    if meta.get("_skip"):
-        n_old = _count_chunks_for_path(file_path)
+    with state.work_lock:
+        # indexed:false → alte Chunks löschen, kein Neu-Ingest
+        if meta.get("_skip"):
+            n_old = _count_chunks_for_path(file_path)
+            from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+            state.qdrant_client.delete(
+                collection_name=COLLECTION_NAME,
+                points_selector=Filter(
+                    must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))]
+                ),
+            )
+            domain_val: str | None = meta.get("domain")
+            if domain_val and domain_val in state.domain_counts:
+                state.domain_counts[domain_val] = max(0, state.domain_counts[domain_val] - n_old)
+            return IngestResponse(
+                file_path=str(file_path),
+                domain=None,
+                chunks_deleted=n_old,
+                chunks_created=0,
+                skipped_reason="indexed:false",
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+            )
+
+        domain: str = meta["domain"]
+
+        # Compute content hash once per ingest (before chunking/embedding — same raw bytes).
+        content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+        # A6: Upsert-before-Delete mit run_id
+        run_id = str(uuid.uuid4())
+
+        from titan.ingest import late_chunk_and_embed, make_point  # lazy imports
+
+        new_chunks = late_chunk_and_embed(content, model=state.bge_model)
+
+        # Count BEFORE upsert so chunks_deleted reflects the true size of the previous version.
+        n_before = _count_chunks_for_path(file_path)
+
+        from qdrant_client.models import PointStruct
+
+        points: list[PointStruct] = [
+            make_point(c, file_path, domain, run_id, content_hash) for c in new_chunks
+        ]
+        state.qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
+
+        # Delete old chunks (different run_id) for the same file.
         from qdrant_client.models import FieldCondition, Filter, MatchValue
 
         state.qdrant_client.delete(
             collection_name=COLLECTION_NAME,
             points_selector=Filter(
-                must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))]
+                must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))],
+                must_not=[FieldCondition(key="run_id", match=MatchValue(value=run_id))],
             ),
         )
-        domain_val: str | None = meta.get("domain")
-        if domain_val and domain_val in state.domain_counts:
-            state.domain_counts[domain_val] = max(0, state.domain_counts[domain_val] - n_old)
-        return IngestResponse(
-            file_path=str(file_path),
-            domain=None,
-            chunks_deleted=n_old,
-            chunks_created=0,
-            skipped_reason="indexed:false",
-            latency_ms=int((time.perf_counter() - t0) * 1000),
+
+        # Domain-Counter aktualisieren (A10: Cache-Invalidierung folgt nach diesem Block)
+        state.domain_counts[domain] = (
+            state.domain_counts.get(domain, 0) - n_before + len(new_chunks)
         )
 
-    domain: str = meta["domain"]
+        # A10: Cache für diese Domain invalidieren
+        from titan.search import invalidate_domain_cache
 
-    # Compute content hash once per ingest (before chunking/embedding — same raw bytes).
-    content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+        invalidate_domain_cache(state.qdrant_client, domain)
 
-    # A6: Upsert-before-Delete mit run_id
-    run_id = str(uuid.uuid4())
-
-    from titan.ingest import late_chunk_and_embed, make_point  # lazy imports
-
-    new_chunks = late_chunk_and_embed(content, model=state.bge_model)
-
-    # Count BEFORE upsert so chunks_deleted reflects the true size of the previous version.
-    n_before = _count_chunks_for_path(file_path)
-
-    from qdrant_client.models import PointStruct
-
-    points: list[PointStruct] = [
-        make_point(c, file_path, domain, run_id, content_hash) for c in new_chunks
-    ]
-    state.qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
-
-    # Delete old chunks (different run_id) for the same file.
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    state.qdrant_client.delete(
-        collection_name=COLLECTION_NAME,
-        points_selector=Filter(
-            must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))],
-            must_not=[FieldCondition(key="run_id", match=MatchValue(value=run_id))],
-        ),
-    )
-
-    # Domain-Counter aktualisieren (A10: Cache-Invalidierung folgt nach diesem Block)
-    state.domain_counts[domain] = state.domain_counts.get(domain, 0) - n_before + len(new_chunks)
-
-    # A10: Cache für diese Domain invalidieren
-    from titan.search import invalidate_domain_cache
-
-    invalidate_domain_cache(state.qdrant_client, domain)
-
-    state.last_ingest_at = time.monotonic()  # for GET /stats "last ingest age"
+        state.last_ingest_at = time.monotonic()  # for GET /stats "last ingest age"
 
     return IngestResponse(
         file_path=str(file_path),
@@ -332,7 +360,7 @@ async def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
 
 
 @router.post("/find_related", response_model=FindRelatedResponse)
-async def find_related_endpoint(req: FindRelatedRequest) -> FindRelatedResponse:
+def find_related_endpoint(req: FindRelatedRequest) -> FindRelatedResponse:
     """Findet semantisch ähnliche Notes via Dense-Vektor des ersten Chunks."""
     if state.qdrant_client is None:
         raise HTTPException(503, "Service nicht bereit")
@@ -396,40 +424,43 @@ async def find_related_endpoint(req: FindRelatedRequest) -> FindRelatedResponse:
 
 
 @router.delete("/chunks", response_model=DeleteChunksResponse)
-async def delete_chunks(source_path: str) -> DeleteChunksResponse:
+def delete_chunks(source_path: str) -> DeleteChunksResponse:
     """Löscht alle Chunks einer Datei. Aktualisiert Domain-Counter."""
     if state.qdrant_client is None:
         raise HTTPException(503, "Service nicht bereit")
 
     path = _path_check(source_path)
 
-    n = _count_chunks_for_path(path)
-
     from qdrant_client.models import FieldCondition, Filter, MatchValue
 
-    # Domain vor dem Löschen ermitteln (für Counter-Update)
-    records, _ = state.qdrant_client.scroll(
-        collection_name=COLLECTION_NAME,
-        scroll_filter=Filter(
-            must=[FieldCondition(key="source_path", match=MatchValue(value=str(path)))]
-        ),
-        limit=1,
-        with_payload=["domain"],
-        with_vectors=False,
-    )
-    domain_to_update: str | None = None
-    if records:
-        domain_to_update = (records[0].payload or {}).get("domain")
+    with state.work_lock:
+        n = _count_chunks_for_path(path)
 
-    state.qdrant_client.delete(
-        collection_name=COLLECTION_NAME,
-        points_selector=Filter(
-            must=[FieldCondition(key="source_path", match=MatchValue(value=str(path)))]
-        ),
-    )
+        # Domain vor dem Löschen ermitteln (für Counter-Update)
+        records, _ = state.qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=Filter(
+                must=[FieldCondition(key="source_path", match=MatchValue(value=str(path)))]
+            ),
+            limit=1,
+            with_payload=["domain"],
+            with_vectors=False,
+        )
+        domain_to_update: str | None = None
+        if records:
+            domain_to_update = (records[0].payload or {}).get("domain")
 
-    if domain_to_update and domain_to_update in state.domain_counts:
-        state.domain_counts[domain_to_update] = max(0, state.domain_counts[domain_to_update] - n)
+        state.qdrant_client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=Filter(
+                must=[FieldCondition(key="source_path", match=MatchValue(value=str(path)))]
+            ),
+        )
+
+        if domain_to_update and domain_to_update in state.domain_counts:
+            state.domain_counts[domain_to_update] = max(
+                0, state.domain_counts[domain_to_update] - n
+            )
 
     return DeleteChunksResponse(source_path=str(path), chunks_deleted=n)
 
@@ -438,7 +469,7 @@ async def delete_chunks(source_path: str) -> DeleteChunksResponse:
 
 
 @router.get("/notes", response_model=NotesResponse)
-async def list_notes() -> NotesResponse:
+def list_notes() -> NotesResponse:
     """Listet alle indexierten Notes, gruppiert nach source_path.
 
     Scrollt die gesamte Collection und aggregiert pro Datei die Chunk-Anzahl
@@ -484,7 +515,7 @@ async def list_notes() -> NotesResponse:
 
 
 @router.get("/domains/{domain}/notes", response_model=NotesResponse)
-async def list_domain_notes(domain: str) -> NotesResponse:
+def list_domain_notes(domain: str) -> NotesResponse:
     """Listet alle Notes der angegebenen Domain, gruppiert nach source_path.
 
     Filtert die Collection via Qdrant scroll_filter auf das domain-Payload-Feld.
