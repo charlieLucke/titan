@@ -11,6 +11,7 @@ Aufruf:
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 from collections import Counter
@@ -97,6 +98,26 @@ def _init_domain_counts(client: Any) -> Counter[str]:
     return counts
 
 
+# Epic 5B: Intervall für den periodischen Cache-Cleanup (1×/Tag reicht —
+# der Lookup filtert ohnehin per TTL, der Task löscht nur physisch nach).
+_CACHE_CLEANUP_INTERVAL_S = 24 * 3600
+
+
+async def _cache_cleanup_loop() -> None:
+    """Löscht TTL-abgelaufene Cache-Einträge: einmal beim Start, dann täglich.
+
+    Ohne diesen Task wuchs die Cache-Collection unbegrenzt (Cleanup gab es
+    nur manuell via CLI --cache-cleanup). cache_cleanup ist best-effort und
+    fängt eigene Fehler.
+    """
+    from titan.search import cache_cleanup
+
+    while True:
+        if state.qdrant_client is not None:
+            await asyncio.to_thread(cache_cleanup, state.qdrant_client)
+        await asyncio.sleep(_CACHE_CLEANUP_INTERVAL_S)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Startup: Ressourcen laden. Shutdown: Ressourcen freigeben."""
@@ -120,11 +141,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         log.warning("Domain-Counter-Init fehlgeschlagen (Service läuft weiter): %s", exc)
         state.domain_counts = Counter()
 
+    cleanup_task: asyncio.Task[None] | None = None
+    if settings.cache_enabled:
+        cleanup_task = asyncio.create_task(_cache_cleanup_loop())
+
     log.info("Titan Service bereit.")
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────────
     log.info("Titan Service fährt herunter …")
+    if cleanup_task is not None:
+        cleanup_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await cleanup_task
     del state.bge_model
     state.bge_model = None
     torch.cuda.empty_cache()

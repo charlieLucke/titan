@@ -230,40 +230,46 @@ def load_bge_m3_model() -> Any:
         sys.exit(1)
 
 
-def embed_query(model: Any, query: str) -> dict[str, Any]:
-    """Vektorisiert eine einzelne Query und gibt alle drei Vektor-Typen zurück.
+def embed_queries(model: Any, queries: list[str]) -> list[dict[str, Any]]:
+    """Vektorisiert alle Sub-Queries in EINEM encode()-Batch.
+
+    Ein GPU-Roundtrip statt einem pro Sub-Query — bei 3–4 Sub-Queries spart
+    das den Großteil der Embedding-Latenz einer Suche.
 
     Args:
         model: BGEM3FlagModel-Instanz.
-        query: Die zu vektorisierende Query.
+        queries: Die zu vektorisierenden Queries.
 
     Returns:
-        Dict mit keys:
+        Liste von Dicts (eine pro Query) mit keys:
             dense:   list[float] – 1024-dim Vektor
             sparse:  dict[str, float] – {token_id: gewicht}
             colbert: list[list[float]] – (seq_len × 128) Matrix
     """
-    log.info("Vektorisiere Query: '%s%s'", query[:80], "…" if len(query) > 80 else "")
+    log.info(
+        "Vektorisiere %d Quer%s in einem Batch", len(queries), "ys" if len(queries) > 1 else "y"
+    )
     with torch.no_grad():
         output = model.encode(
-            [query],
+            queries,
             return_dense=True,
             return_sparse=True,
             return_colbert_vecs=True,
-            batch_size=1,
+            batch_size=len(queries),
         )
-    result: dict[str, Any] = {
-        "dense": output["dense_vecs"][0].tolist(),
-        "sparse": output["lexical_weights"][0],
-        "colbert": output["colbert_vecs"][0].tolist(),
-    }
-    log.info(
-        "Query-Embedding: dense=%dd, sparse=%d tokens, colbert=%d token-vecs",
-        len(result["dense"]),
-        len(result["sparse"]),
-        len(result["colbert"]),
-    )
-    return result
+    return [
+        {
+            "dense": output["dense_vecs"][i].tolist(),
+            "sparse": output["lexical_weights"][i],
+            "colbert": output["colbert_vecs"][i].tolist(),
+        }
+        for i in range(len(queries))
+    ]
+
+
+def embed_query(model: Any, query: str) -> dict[str, Any]:
+    """Vektorisiert eine einzelne Query (Wrapper um embed_queries)."""
+    return embed_queries(model, [query])[0]
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -713,9 +719,10 @@ def search(
     ranked_lists: list[list[dict[str, Any]]] = []
     cache_hit = False
 
-    for sq in sub_queries:
-        vecs = embed_query(model, sq)
+    # Alle Sub-Queries in einem GPU-Batch vektorisieren (statt einzeln).
+    all_vecs = embed_queries(model, sub_queries)
 
+    for sq, vecs in zip(sub_queries, all_vecs, strict=True):
         if use_cache and CACHE_ENABLED:
             cached = cache_lookup(qdrant_client, sq, vecs["dense"], domain)
             if cached is not None and cached:
@@ -823,70 +830,24 @@ def main() -> None:
             print_cache_stats(client)
         sys.exit(0)
 
-    # ── Epic 2a: Query De-construction (VOR GPU-Lock!) ───────────────────────
-    sub_queries = decompose_query(args.query)
-
-    # Original-Query als semantischen Anker immer behalten
-    if args.query not in sub_queries:
-        sub_queries.append(args.query)
-
-    # ── GPU-Lock vor Modell-Load erwerben ─────────────────────────────────────
+    # Die komplette Pipeline (Decompose → GPU-Lock → Modell → Suche → RRF)
+    # lebt in search() — main() ist nur noch CLI-Adapter. Vorher war die
+    # Pipeline hier ein zweites Mal ausprogrammiert (Drift-Gefahr zwischen
+    # Service- und CLI-Pfad).
     try:
-        _gpu_lock = acquire_gpu_lock()
+        result = search(
+            query=args.query,
+            domain=args.domain,
+            top_k=args.top_k,
+            prefetch_limit=args.prefetch,
+            use_decompose=True,
+            use_cache=not args.no_cache,
+        )
     except RuntimeError as e:
         log.critical(str(e))
         sys.exit(1)
 
-    # ── Phase 5a: BGE-M3 laden + alle Sub-Queries vektorisieren ──────────────
-    model = load_bge_m3_model()
-    client = build_qdrant_client()
-
-    if CACHE_ENABLED and not args.no_cache:
-        bootstrap_cache_collection(client)
-
-    # RRF-Kandidatenpool: pro Sub-Query top_k × Anzahl Sub-Queries holen
-    rrf_candidates = args.top_k * max(len(sub_queries), 3)
-
-    ranked_lists: list[list[dict[str, Any]]] = []
-    for sq in sub_queries:
-        vecs = embed_query(model, sq)
-
-        if CACHE_ENABLED and not args.no_cache:
-            cached = cache_lookup(client, sq, vecs["dense"], args.domain)
-            if cached is not None:
-                if not cached:
-                    log.warning(
-                        "Cache-Hit für '%s' gab leere Chunks zurück (behandle als Miss).", sq
-                    )
-                else:
-                    ranked_lists.append(cached)
-                    continue
-
-        search_results = hybrid_search_with_rerank(
-            client,
-            vecs,
-            prefetch_limit=args.prefetch,
-            final_top_k=rrf_candidates,
-            domain=args.domain,
-        )
-
-        if CACHE_ENABLED and not args.no_cache and search_results:
-            cache_write(client, sq, vecs["dense"], args.domain, search_results)
-
-        ranked_lists.append(search_results)
-
-    final_results: list[dict[str, Any]]
-    if len(ranked_lists) > 1:
-        log.info(
-            "RRF-Fusion: %d Ergebnislisten (je %d Kandidaten) → finale Rangliste (k=60)",
-            len(ranked_lists),
-            rrf_candidates,
-        )
-        final_results = rrf_fusion(ranked_lists)[: args.top_k]
-    else:
-        final_results = ranked_lists[0][: args.top_k]
-
-    print_results(final_results, as_json=args.json, original_query=args.query)
+    print_results(result["chunks"], as_json=args.json, original_query=args.query)
 
 
 if __name__ == "__main__":

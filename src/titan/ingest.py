@@ -156,10 +156,6 @@ def _compute_section_id(source: str, header: str) -> str:
     return hashlib.sha256(f"{source}::{header}".encode()).hexdigest()[:16]
 
 
-def _compute_section_hash(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
 _HEADER_RE = re.compile(r"^(#{1,2}\s+.+)", re.MULTILINE)
 
 
@@ -218,7 +214,6 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
                         "chunk_id": global_chunk_id,
                         "header": sub_header,
                         "section_id": _compute_section_id(source_path.name, header),
-                        "section_full_text": text,
                         "document_title": document_title,
                     }
                 )
@@ -244,7 +239,6 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
                     "chunk_id": global_chunk_id,
                     "header": source_path.stem,
                     "section_id": _compute_section_id(source_path.name, source_path.stem),
-                    "section_full_text": text,
                     "document_title": document_title,
                 }
             ]
@@ -274,7 +268,6 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
                     "chunk_id": global_chunk_id,
                     "header": header_title,
                     "section_id": _compute_section_id(source_path.name, header_title),
-                    "section_full_text": text,
                     "document_title": document_title,
                 }
             )
