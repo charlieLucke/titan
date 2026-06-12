@@ -244,6 +244,27 @@ def _count_chunks_for_path(file_path: Path) -> int:
     return int(count_result.count)
 
 
+def _stored_content_hash(file_path: Path) -> str | None:
+    """Liest den content_hash der indexierten Version einer Datei (oder None)."""
+    if state.qdrant_client is None:
+        return None
+    from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+    records, _ = state.qdrant_client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))]
+        ),
+        limit=1,
+        with_payload=["content_hash"],
+        with_vectors=False,
+    )
+    if not records:
+        return None
+    value = (records[0].payload or {}).get("content_hash")
+    return str(value) if value else None
+
+
 @router.post("/ingest/file", response_model=IngestResponse)
 def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
     """Indexiert eine Markdown-Datei (Upsert-before-Delete mit run_id).
@@ -307,6 +328,20 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
 
         # Compute content hash once per ingest (before chunking/embedding — same raw bytes).
         content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+        # Content-Hash-Skip: identische Bytes wie die indexierte Version → kein
+        # Re-Embed. Der Watcher feuert auch bei reinen Metadaten-Events
+        # (Syncthing-Rename, Editor-Save ohne Änderung); ohne den Skip kostet
+        # jeder davon einen vollen GPU-Durchlauf. force=True erzwingt Re-Ingest.
+        if not req.force and _stored_content_hash(file_path) == content_hash:
+            return IngestResponse(
+                file_path=str(file_path),
+                domain=domain,
+                chunks_deleted=0,
+                chunks_created=0,
+                skipped_reason="unchanged",
+                latency_ms=int((time.perf_counter() - t0) * 1000),
+            )
 
         # A6: Upsert-before-Delete mit run_id
         run_id = str(uuid.uuid4())

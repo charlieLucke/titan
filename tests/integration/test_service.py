@@ -284,6 +284,30 @@ def test_ingest_same_note_twice(app_client: TestClient, tmp_vault: Path) -> None
 
 
 @pytest.mark.integration
+def test_ingest_unchanged_skipped(app_client: TestClient, tmp_vault: Path) -> None:
+    """Unveränderte Note → skipped_reason 'unchanged'; force=True erzwingt Re-Ingest."""
+    note = tmp_vault / "unchanged.md"
+    note.write_text("---\ndomain: skiptest\n---\n# Unverändert\nInhalt SIGMA1234.")
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        resp1 = app_client.post("/ingest/file", json={"file_path": str(note)})
+        resp2 = app_client.post("/ingest/file", json={"file_path": str(note)})
+        resp3 = app_client.post("/ingest/file", json={"file_path": str(note), "force": True})
+
+    assert resp1.status_code == 200, resp1.text
+    assert resp1.json()["chunks_created"] > 0
+
+    assert resp2.status_code == 200
+    assert resp2.json()["skipped_reason"] == "unchanged"
+    assert resp2.json()["chunks_created"] == 0
+    assert resp2.json()["chunks_deleted"] == 0
+
+    assert resp3.status_code == 200
+    assert resp3.json()["skipped_reason"] is None
+    assert resp3.json()["chunks_created"] > 0
+
+
+@pytest.mark.integration
 def test_ingest_indexed_false(app_client: TestClient, tmp_vault: Path) -> None:
     """POST /ingest/file mit indexed:false → skipped, chunks_created == 0."""
     note = tmp_vault / "test_skip.md"

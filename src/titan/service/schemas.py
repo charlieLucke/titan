@@ -55,7 +55,10 @@ class SearchResponse(BaseModel):
 
 class IngestRequest(BaseModel):
     file_path: str = Field(..., description="Absoluter Pfad, muss unter VAULT_ROOT liegen")
-    force: bool = False
+    force: bool = Field(
+        default=False,
+        description="True erzwingt Re-Embed auch bei unverändertem content_hash",
+    )
 
 
 class IngestResponse(BaseModel):
