@@ -28,7 +28,6 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import re
 import sys
 import time
@@ -37,8 +36,8 @@ from typing import Any
 
 import requests
 import torch
-from dotenv import load_dotenv
 
+from titan.config import settings
 from titan.utils import acquire_gpu_lock, cache_uuid, sanitize
 
 # Windows: stdout-Pipe auf UTF-8 erzwingen (verhindert UnicodeEncodeError bei
@@ -54,22 +53,16 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ─── Konfiguration ───────────────────────────────────────────────────────────
-load_dotenv()
-
-QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_GRPC_PORT: int = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
-QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
-COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "mein_wissen")
-OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "phi4:latest")
+# ─── Konfiguration (zentral in titan.config, hier nur Aliase) ────────────────
+COLLECTION_NAME: str = settings.collection_name
+OLLAMA_URL: str = settings.ollama_url
+OLLAMA_MODEL: str = settings.ollama_model
 
 # Epic 5B Semantic Caching
-CACHE_ENABLED: bool = os.getenv("CACHE_ENABLED", "true").lower() == "true"
-CACHE_COLLECTION_NAME: str = os.getenv("CACHE_COLLECTION_NAME", "query_cache")
-CACHE_THRESHOLD: float = float(os.getenv("CACHE_THRESHOLD", "0.95"))
-CACHE_TTL_SECONDS: int = int(os.getenv("CACHE_TTL_SECONDS", "604800"))
-CACHE_TOP_K: int = int(os.getenv("CACHE_TOP_K", "1"))
+CACHE_ENABLED: bool = settings.cache_enabled
+CACHE_COLLECTION_NAME: str = settings.cache_collection_name
+CACHE_THRESHOLD: float = settings.cache_threshold
+CACHE_TTL_SECONDS: int = settings.cache_ttl_seconds
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -217,7 +210,7 @@ def rrf_fusion(ranked_lists: list[list[dict[str, Any]]], k: int = 60) -> list[di
 
 
 def load_bge_m3_model() -> Any:
-    """Lädt BGE-M3 mit CUDA.
+    """CLI-Wrapper um titan.infra.load_bge_m3_model (sys.exit statt Exception).
 
     Bei gecachtem Modell startet der Prozess in ~2 s statt ~20 s
     (HuggingFace-Cache).
@@ -228,16 +221,13 @@ def load_bge_m3_model() -> Any:
     Raises:
         SystemExit: Wenn FlagEmbedding nicht installiert ist.
     """
-    try:
-        from FlagEmbedding import BGEM3FlagModel
-    except ImportError:
-        log.critical("FlagEmbedding fehlt. Installation: uv add flagembedding")
-        sys.exit(1)
+    from titan.infra import load_bge_m3_model as _load
 
-    log.info("Lade BAAI/bge-m3 auf CUDA (FP16) …")
-    model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device="cuda")
-    log.info("BGE-M3 bereit.")
-    return model
+    try:
+        return _load()
+    except RuntimeError as exc:
+        log.critical(str(exc))
+        sys.exit(1)
 
 
 def embed_query(model: Any, query: str) -> dict[str, Any]:
@@ -518,17 +508,9 @@ def build_qdrant_client() -> Any:
     if _qdrant_client is not None:
         return _qdrant_client
 
-    from qdrant_client import QdrantClient
+    from titan.infra import make_qdrant_client
 
-    log.info("Verbinde mit Qdrant gRPC: %s:%d", QDRANT_HOST, QDRANT_GRPC_PORT)
-    client = QdrantClient(
-        host=QDRANT_HOST,
-        grpc_port=QDRANT_GRPC_PORT,
-        prefer_grpc=True,
-        api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
-        https=False,
-        check_compatibility=False,
-    )
+    client = make_qdrant_client()
     try:
         client.get_collection(COLLECTION_NAME)
         log.info("Collection '%s' gefunden.", COLLECTION_NAME)

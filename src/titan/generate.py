@@ -29,15 +29,14 @@ import argparse
 import contextlib
 import json
 import logging
-import os
 import sys
 import textwrap
 from pathlib import Path
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
 
+from titan.config import settings
 from titan.utils import sanitize
 
 # ─── Logging ────────────────────────────────────────────────────────────────
@@ -49,11 +48,9 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─── Konfiguration ───────────────────────────────────────────────────────────
-load_dotenv()
-
-OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "phi4:latest")
-OLLAMA_TIMEOUT: int = int(os.getenv("OLLAMA_TIMEOUT", "120"))
+OLLAMA_URL: str = settings.ollama_url
+OLLAMA_MODEL: str = settings.ollama_model
+OLLAMA_TIMEOUT: int = settings.ollama_timeout
 
 
 # ════════════════════════════════════════════════════════════════════════════

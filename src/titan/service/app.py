@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 from collections import Counter
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -21,48 +20,17 @@ from typing import Any
 
 import torch
 import uvicorn
-from dotenv import load_dotenv
 from fastapi import FastAPI
 
+from titan.config import settings
+from titan.infra import load_bge_m3_model, make_qdrant_client
 from titan.service.state import state
 from titan.utils import acquire_gpu_lock
 
-load_dotenv()
-
 log = logging.getLogger(__name__)
 
-COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "mein_wissen")
-QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_GRPC_PORT: int = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
-QDRANT_API_KEY: str | None = os.getenv("QDRANT_API_KEY")
-
-
-def _load_bge_m3() -> Any:
-    """Lädt BGE-M3 (FP16) auf CUDA."""
-    try:
-        from FlagEmbedding import BGEM3FlagModel
-    except ImportError as exc:
-        raise RuntimeError("FlagEmbedding fehlt. Installation: uv add flagembedding") from exc
-
-    log.info("Lade BAAI/bge-m3 auf CUDA (FP16) …")
-    model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device="cuda")
-    log.info("BGE-M3 bereit.")
-    return model
-
-
-def _make_qdrant_client() -> Any:
-    """Erstellt einen Qdrant-Client via gRPC."""
-    from qdrant_client import QdrantClient
-
-    log.info("Verbinde mit Qdrant gRPC: %s:%d", QDRANT_HOST, QDRANT_GRPC_PORT)
-    return QdrantClient(
-        host=QDRANT_HOST,
-        grpc_port=QDRANT_GRPC_PORT,
-        prefer_grpc=True,
-        api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
-        https=False,
-        check_compatibility=False,
-    )
+# Alias auf die zentralen Settings (Tests patchen titan.config.settings).
+COLLECTION_NAME: str = settings.collection_name
 
 
 def _validate_embedding_dimension(client: Any) -> None:
@@ -137,8 +105,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     state.gpu_lock = acquire_gpu_lock()
 
-    state.bge_model = _load_bge_m3()
-    state.qdrant_client = _make_qdrant_client()
+    state.bge_model = load_bge_m3_model()
+    state.qdrant_client = make_qdrant_client()
 
     try:
         _validate_embedding_dimension(state.qdrant_client)

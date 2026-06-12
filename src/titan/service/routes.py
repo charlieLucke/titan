@@ -20,7 +20,6 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import logging
-import os
 import time
 import uuid
 from pathlib import Path
@@ -29,6 +28,7 @@ from typing import Literal
 import torch
 from fastapi import APIRouter, HTTPException
 
+from titan.config import settings
 from titan.service.schemas import (
     Chunk,
     DeleteChunksResponse,
@@ -47,11 +47,13 @@ from titan.service.schemas import (
 from titan.service.state import state
 from titan.service.stats import build_stats
 
-VAULT_ROOT = Path(os.getenv("VAULT_ROOT", "/mnt/f/vault")).resolve()
+# Aliase auf die zentralen Settings (Import-Zeit-Snapshot; Tests patchen die
+# Modul-Attribute, der Service liest Konfiguration ohnehin nur beim Start).
+VAULT_ROOT: Path = settings.vault_root.resolve()
 
 log = logging.getLogger(__name__)
 
-COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "mein_wissen")
+COLLECTION_NAME: str = settings.collection_name
 
 router = APIRouter()
 

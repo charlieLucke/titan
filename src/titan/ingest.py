@@ -31,7 +31,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import logging
-import os
 import re
 import sys
 import uuid
@@ -40,8 +39,8 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from dotenv import load_dotenv
 
+from titan.config import settings
 from titan.utils import acquire_gpu_lock
 
 # ─── Logging ────────────────────────────────────────────────────────────────
@@ -52,23 +51,18 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-# ─── Konfiguration aus .env ──────────────────────────────────────────────────
-load_dotenv()
-
-QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_GRPC_PORT: int = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
-QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
-COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "mein_wissen")
-MAX_WORKERS: int = int(os.getenv("MAX_WORKERS", "12"))
-EMBED_BATCH_SIZE: int = int(os.getenv("EMBED_BATCH_SIZE", "32"))
+# ─── Konfiguration (zentral in titan.config, hier nur Aliase) ────────────────
+COLLECTION_NAME: str = settings.collection_name
+MAX_WORKERS: int = settings.max_workers
+EMBED_BATCH_SIZE: int = settings.embed_batch_size
 
 # Path-Traversal-Schutz: Ingest nur aus diesem Verzeichnis erlaubt
-INGEST_BASE_DIR: Path = Path(os.getenv("INGEST_BASE_DIR", "/mnt/f/data/titan-input")).resolve()
+INGEST_BASE_DIR: Path = settings.ingest_base_dir.resolve()
 
 # Epic 3: Late Chunking
 # BGE-M3 Hard-Limit: 8192 Tokens. Fenster-Ziel mit ~400-Token-Puffer.
 BGE_MAX_TOKENS: int = 8192
-LATE_CHUNK_WINDOW_TOKENS: int = int(os.getenv("LATE_CHUNK_WINDOW_TOKENS", "7800"))
+LATE_CHUNK_WINDOW_TOKENS: int = settings.late_chunk_window_tokens
 # Trennzeichen zwischen Chunks im Fenstertext
 _WINDOW_SEP = "\n\n[SEP]\n\n"
 
@@ -306,14 +300,12 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
 
 
 def load_bge_m3_model() -> Any:
-    """Lädt das BGE-M3 Modell via FlagEmbedding mit zwingender CUDA-Beschleunigung.
+    """CLI-Wrapper um titan.infra.load_bge_m3_model (sys.exit statt Exception).
 
     FlagEmbedding erzeugt in einem encode()-Aufruf:
       - dense_vecs       – 1024-dim Dense-Vektor
       - lexical_weights  – Sparse Token-Gewichte
       - colbert_vecs     – Token-Level Matrizen für Late Interaction / MaxSim
-
-    use_fp16=True: Halbiert VRAM-Verbrauch, vernachlässigbare Qualitätseinbuße.
 
     Returns:
         BGEM3FlagModel-Instanz.
@@ -321,16 +313,13 @@ def load_bge_m3_model() -> Any:
     Raises:
         SystemExit: Wenn FlagEmbedding nicht installiert ist.
     """
-    try:
-        from FlagEmbedding import BGEM3FlagModel
-    except ImportError:
-        log.critical("FlagEmbedding fehlt. Installation: uv add flagembedding")
-        sys.exit(1)
+    from titan.infra import load_bge_m3_model as _load
 
-    log.info("Lade BAAI/bge-m3 auf CUDA (FP16) …")
-    model = BGEM3FlagModel("BAAI/bge-m3", use_fp16=True, device="cuda")
-    log.info("BGE-M3 geladen und CUDA-Kontext bereit.")
-    return model
+    try:
+        return _load()
+    except RuntimeError as exc:
+        log.critical(str(exc))
+        sys.exit(1)
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -591,9 +580,10 @@ def late_chunk_embed(model: Any, chunks: list[dict[str, Any]]) -> list[dict[str,
 
 
 def build_qdrant_client() -> Any:
-    """Verbindet mit der lokalen Qdrant-Instanz via gRPC.
+    """Verbindet mit der lokalen Qdrant-Instanz via gRPC (Ingest-Setup).
 
-    gRPC ist schneller als REST bei großen Batch-Uploads.
+    Konstruktion via titan.infra; hier zusätzlich Collection-Check,
+    HNSW-Tuning und Payload-Index (idempotent).
 
     Returns:
         QdrantClient-Instanz.
@@ -601,19 +591,11 @@ def build_qdrant_client() -> Any:
     Raises:
         SystemExit: Wenn Qdrant nicht erreichbar oder die Collection fehlt.
     """
-    from qdrant_client import QdrantClient
     from qdrant_client.models import HnswConfigDiff, PayloadSchemaType
 
-    _masked = (QDRANT_API_KEY[:4] + "***") if QDRANT_API_KEY else "—"
-    log.info("Verbinde mit Qdrant gRPC: %s:%d (key: %s)", QDRANT_HOST, QDRANT_GRPC_PORT, _masked)
-    client = QdrantClient(
-        host=QDRANT_HOST,
-        grpc_port=QDRANT_GRPC_PORT,
-        prefer_grpc=True,
-        api_key=QDRANT_API_KEY if QDRANT_API_KEY else None,
-        https=False,
-        check_compatibility=False,
-    )
+    from titan.infra import make_qdrant_client
+
+    client = make_qdrant_client()
 
     try:
         collections = client.get_collections()

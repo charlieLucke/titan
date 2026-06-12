@@ -20,7 +20,6 @@ import argparse
 import contextlib
 import json
 import logging
-import os
 import sys
 import time
 from collections import defaultdict
@@ -28,9 +27,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import requests
-from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 
+from titan.config import settings
 from titan.evaluate import eval_answer_relevance, evaluate_triad, summarize_results
 from titan.utils import sanitize
 
@@ -43,18 +42,17 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─── Konfiguration ───────────────────────────────────────────────────────────
-load_dotenv()
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     with contextlib.suppress(AttributeError):
         sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
 
-OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "phi4:latest")
-QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_GRPC_PORT: int = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
-QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
-COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "mein_wissen")
+OLLAMA_URL: str = settings.ollama_url
+OLLAMA_MODEL: str = settings.ollama_model
+QDRANT_HOST: str = settings.qdrant_host
+QDRANT_GRPC_PORT: int = settings.qdrant_grpc_port
+QDRANT_API_KEY: str = settings.qdrant_api_key
+COLLECTION_NAME: str = settings.collection_name
 
 # ── Globale Modell-Instanzen (einmal laden, für alle Cases wiederverwenden) ──
 _BGE_MODEL: Any = None

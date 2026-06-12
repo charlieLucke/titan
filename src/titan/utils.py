@@ -19,14 +19,15 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import logging
-import os
 import uuid
+
+from titan.config import settings
 
 log = logging.getLogger(__name__)
 
 # Gemeinsamer Lock-Pfad für alle BGE-M3-nutzenden Module.
 # Wert in .env setzen: GPU_LOCK_PATH=/tmp/bge_m3.lock
-GPU_LOCK_PATH = os.getenv("GPU_LOCK_PATH", "/tmp/bge_m3.lock")
+GPU_LOCK_PATH = settings.gpu_lock_path
 
 # fcntl ist Unix-only – auf Windows entfällt der harte GPU-Lock
 _FCNTL_AVAILABLE: bool = importlib.util.find_spec("fcntl") is not None

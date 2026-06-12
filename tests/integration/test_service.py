@@ -30,6 +30,8 @@ from fastapi.testclient import TestClient
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 
 TEST_COLLECTION = f"titan_test_{uuid.uuid4().hex[:8]}"
+# Eigene Cache-Collection, damit Tests nicht in den echten query_cache schreiben.
+TEST_CACHE_COLLECTION = f"{TEST_COLLECTION}_cache"
 
 
 @pytest.fixture(scope="module")
@@ -83,6 +85,8 @@ def qdrant_client() -> Generator[Any, None, None]:
     with contextlib.suppress(Exception):
         client.delete_collection(TEST_COLLECTION)
     with contextlib.suppress(Exception):
+        client.delete_collection(TEST_CACHE_COLLECTION)
+    with contextlib.suppress(Exception):
         client.close()
 
 
@@ -110,11 +114,17 @@ def app_client(qdrant_client: Any, bge_model: Any) -> Generator[TestClient, None
 
     state.domain_counts = Counter()
 
-    # COLLECTION_NAME auf Test-Collection umbiegen
+    # COLLECTION_NAME auf Test-Collection umbiegen. Seit titan.config zentral
+    # ist, werden ALLE Alias-Stellen gepatcht — auch titan.search/titan.ingest,
+    # deren Modul-Aliase sonst (je nach Importreihenfolge) auf der echten
+    # Collection stehen bleiben würden.
     with (
-        patch.dict(os.environ, {"COLLECTION_NAME": TEST_COLLECTION}),
+        patch("titan.config.settings.collection_name", TEST_COLLECTION),
         patch("titan.service.routes.COLLECTION_NAME", TEST_COLLECTION),
         patch("titan.service.app.COLLECTION_NAME", TEST_COLLECTION),
+        patch("titan.search.COLLECTION_NAME", TEST_COLLECTION),
+        patch("titan.search.CACHE_COLLECTION_NAME", TEST_CACHE_COLLECTION),
+        patch("titan.ingest.COLLECTION_NAME", TEST_COLLECTION),
     ):
         app = create_app()
         # TestClient ohne Kontextmanager: der lifespan würde sonst BGE-M3 und
@@ -176,7 +186,7 @@ def test_health_degraded_without_qdrant() -> None:
         state.domain_counts = Counter()
 
         with (
-            patch.dict(os.environ, {"COLLECTION_NAME": TEST_COLLECTION}),
+            patch("titan.config.settings.collection_name", TEST_COLLECTION),
             patch("titan.service.routes.COLLECTION_NAME", TEST_COLLECTION),
         ):
             app = create_app()

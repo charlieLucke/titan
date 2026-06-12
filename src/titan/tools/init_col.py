@@ -21,9 +21,7 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 
-from dotenv import load_dotenv
 from qdrant_client import QdrantClient
 from qdrant_client.models import (
     Distance,
@@ -32,6 +30,8 @@ from qdrant_client.models import (
     SparseVectorParams,
     VectorParams,
 )
+
+from titan.config import settings
 
 # ─── Logging ────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -42,12 +42,10 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 # ─── Konfiguration ───────────────────────────────────────────────────────────
-load_dotenv()
-
-QDRANT_HOST: str = os.getenv("QDRANT_HOST", "localhost")
-QDRANT_GRPC_PORT: int = int(os.getenv("QDRANT_GRPC_PORT", "6334"))
-QDRANT_API_KEY: str = os.getenv("QDRANT_API_KEY", "")
-COLLECTION_NAME: str = os.getenv("COLLECTION_NAME", "mein_wissen")
+QDRANT_HOST: str = settings.qdrant_host
+QDRANT_GRPC_PORT: int = settings.qdrant_grpc_port
+QDRANT_API_KEY: str = settings.qdrant_api_key
+COLLECTION_NAME: str = settings.collection_name
 
 
 def init_collection(recreate: bool = False) -> None:

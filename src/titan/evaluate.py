@@ -22,7 +22,6 @@ import argparse
 import contextlib
 import json
 import logging
-import os
 import re
 import sys
 import textwrap
@@ -31,8 +30,8 @@ from collections import defaultdict
 from typing import Any
 
 import requests
-from dotenv import load_dotenv
 
+from titan.config import settings
 from titan.utils import sanitize
 
 # ─── Logging ────────────────────────────────────────────────────────────────
@@ -46,11 +45,9 @@ log = logging.getLogger(__name__)
 # ════════════════════════════════════════════════════════════════════════════
 # Sektion A — Konfiguration & Konstanten
 # ════════════════════════════════════════════════════════════════════════════
-load_dotenv()
-
-OLLAMA_URL: str = os.getenv("OLLAMA_URL", "http://localhost:11434")
-JUDGE_MODEL: str = os.getenv("JUDGE_MODEL", "phi4:latest")
-JUDGE_TIMEOUT: int = int(os.getenv("JUDGE_TIMEOUT", "60"))
+OLLAMA_URL: str = settings.ollama_url
+JUDGE_MODEL: str = settings.judge_model
+JUDGE_TIMEOUT: int = settings.judge_timeout
 JUDGE_NUM_PREDICT: int = 512
 
 LABELS_CR = ["RELEVANT", "TEILWEISE_RELEVANT", "IRRELEVANT"]
