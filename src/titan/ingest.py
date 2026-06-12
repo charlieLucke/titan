@@ -41,6 +41,7 @@ from typing import Any
 import torch
 
 from titan.config import settings
+from titan.models import Chunk
 from titan.utils import acquire_gpu_lock
 
 # ─── Logging ────────────────────────────────────────────────────────────────
@@ -159,7 +160,7 @@ def _compute_section_id(source: str, header: str) -> str:
 _HEADER_RE = re.compile(r"^(#{1,2}\s+.+)", re.MULTILINE)
 
 
-def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
+def chunk_markdown(markdown: str, source_path: Path) -> list[Chunk]:
     """Zerschneidet Markdown-Text an Headern (h1–h2) in semantische Chunks.
 
     Strategie:
@@ -176,7 +177,7 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
         source_path: Pfad zur Quelldatei (wird als Metadaten gespeichert).
 
     Returns:
-        Liste von Chunk-Dicts mit text, source, chunk_id, header, etc.
+        Liste von Chunk-Objekten (ohne Embeddings).
     """
     matches = list(_HEADER_RE.finditer(markdown))
 
@@ -185,9 +186,9 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
     first_h1 = re.search(r"^#\s+(.+)$", markdown, flags=re.MULTILINE)
     document_title = first_h1.group(1).strip() if first_h1 else source_path.stem
 
-    def _split_text(text: str, header: str) -> list[dict[str, Any]]:
+    def _split_text(text: str, header: str) -> list[Chunk]:
         nonlocal global_chunk_id
-        sub_chunks: list[dict[str, Any]] = []
+        sub_chunks: list[Chunk] = []
         pos = 0
         sub_idx = 0
 
@@ -208,14 +209,14 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
             if sub_text:
                 sub_header = f"{header} (Teil {sub_idx + 1})" if sub_idx > 0 else header
                 sub_chunks.append(
-                    {
-                        "text": sub_text,
-                        "source": source_path.name,
-                        "chunk_id": global_chunk_id,
-                        "header": sub_header,
-                        "section_id": _compute_section_id(source_path.name, header),
-                        "document_title": document_title,
-                    }
+                    Chunk(
+                        text=sub_text,
+                        source=source_path.name,
+                        chunk_id=global_chunk_id,
+                        header=sub_header,
+                        section_id=_compute_section_id(source_path.name, header),
+                        document_title=document_title,
+                    )
                 )
                 global_chunk_id += 1
                 sub_idx += 1
@@ -233,14 +234,14 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
             return []
         if len(text) <= MAX_SUPER_CHUNK_CHARS:
             return [
-                {
-                    "text": text,
-                    "source": source_path.name,
-                    "chunk_id": global_chunk_id,
-                    "header": source_path.stem,
-                    "section_id": _compute_section_id(source_path.name, source_path.stem),
-                    "document_title": document_title,
-                }
+                Chunk(
+                    text=text,
+                    source=source_path.name,
+                    chunk_id=global_chunk_id,
+                    header=source_path.stem,
+                    section_id=_compute_section_id(source_path.name, source_path.stem),
+                    document_title=document_title,
+                )
             ]
         log.warning(
             "Dokument '%s' hat keinen Header und ist zu groß (%d Zeichen) – "
@@ -250,7 +251,7 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
         )
         return _split_text(text, source_path.stem)
 
-    chunks: list[dict[str, Any]] = []
+    chunks: list[Chunk] = []
     starts = [m.start() for m in matches]
     ends = [*starts[1:], len(markdown)]
 
@@ -262,14 +263,14 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[dict[str, Any]]:
 
         if len(text) <= MAX_SUPER_CHUNK_CHARS:
             chunks.append(
-                {
-                    "text": text,
-                    "source": source_path.name,
-                    "chunk_id": global_chunk_id,
-                    "header": header_title,
-                    "section_id": _compute_section_id(source_path.name, header_title),
-                    "document_title": document_title,
-                }
+                Chunk(
+                    text=text,
+                    source=source_path.name,
+                    chunk_id=global_chunk_id,
+                    header=header_title,
+                    section_id=_compute_section_id(source_path.name, header_title),
+                    document_title=document_title,
+                )
             )
             global_chunk_id += 1
         else:
@@ -320,31 +321,31 @@ def load_bge_m3_model() -> Any:
 # ════════════════════════════════════════════════════════════════════════════
 
 
-def _group_into_windows(chunks: list[dict[str, Any]], tokenizer: Any) -> list[list[dict[str, Any]]]:
+def _group_into_windows(chunks: list[Chunk], tokenizer: Any) -> list[list[Chunk]]:
     """Gruppiert Chunks in Fenster von max. LATE_CHUNK_WINDOW_TOKENS Tokens.
 
     Verwendet tokenizer.encode() für genaue Token-Zählung. Ingestion ist ein
     Offline-Prozess, daher ist die doppelte Tokenisierung latenzunkritisch.
 
     Args:
-        chunks: Liste von Chunk-Dicts.
+        chunks: Liste von Chunk-Objekten.
         tokenizer: HuggingFace Fast Tokenizer aus dem BGE-M3-Modell.
 
     Returns:
         Liste von Fenstern, jedes eine Chunk-Liste.
     """
-    windows: list[list[dict[str, Any]]] = []
-    current: list[dict[str, Any]] = []
+    windows: list[list[Chunk]] = []
+    current: list[Chunk] = []
     current_tokens: int = 0
 
     for chunk in chunks:
-        n = len(tokenizer.encode(chunk["text"], add_special_tokens=False))
+        n = len(tokenizer.encode(chunk.text, add_special_tokens=False))
 
         if n > LATE_CHUNK_WINDOW_TOKENS:
             log.warning(
                 "Chunk '%s' hat ~%d Tokens (Limit: %d) – eigenes Fenster, "
                 "BGE-M3 trunciert auf 8192 Tokens.",
-                chunk.get("header", "?"),
+                chunk.header,
                 n,
                 LATE_CHUNK_WINDOW_TOKENS,
             )
@@ -370,7 +371,7 @@ def _group_into_windows(chunks: list[dict[str, Any]], tokenizer: Any) -> list[li
 
 
 def _embed_window(
-    window_chunks: list[dict[str, Any]],
+    window_chunks: list[Chunk],
     transformer: Any,
     tokenizer: Any,
     sparse_linear: Any,
@@ -388,7 +389,7 @@ def _embed_window(
     5. Sparse:  relu(sparse_linear) → {token_id → max_weight} Dict.
     6. ColBERT: colbert_linear auf hidden[1:] + L2-Norm → Token-Slice.
 
-    Schreibt dense/sparse/colbert direkt in die Chunk-Dicts (in-place).
+    Schreibt dense/sparse/colbert direkt in die Chunk-Objekte (in-place).
 
     Args:
         window_chunks: Chunks in diesem Fenster.
@@ -404,7 +405,7 @@ def _embed_window(
         win_idx + 1,
         total_windows,
         len(window_chunks),
-        sum(len(c["text"]) for c in window_chunks),
+        sum(len(c.text) for c in window_chunks),
     )
 
     # ── 1. Fenstertext + Zeichenoffsets aufbauen ──────────────────────────────
@@ -412,7 +413,7 @@ def _embed_window(
     char_ranges: list[tuple[int, int]] = []
     for i, chunk in enumerate(window_chunks):
         start = len(window_text)
-        window_text += chunk["text"]
+        window_text += chunk.text
         char_ranges.append((start, len(window_text)))
         if i < len(window_chunks) - 1:
             window_text += _WINDOW_SEP
@@ -453,7 +454,7 @@ def _embed_window(
         if not tok_mask.any():
             log.warning(
                 "Keine Tokens für Chunk '%s' – Fallback auf alle Content-Tokens.",
-                chunk.get("header", "?"),
+                chunk.header,
             )
             tok_mask = off_end > 0
 
@@ -463,7 +464,7 @@ def _embed_window(
         chunk_hidden = hidden[tok_mask_gpu]
         dense_vec = chunk_hidden.mean(dim=0)
         dense_vec = torch.nn.functional.normalize(dense_vec.unsqueeze(0), p=2, dim=-1).squeeze(0)
-        chunk["dense"] = dense_vec.cpu().tolist()
+        chunk.dense = dense_vec.cpu().tolist()
 
         # Sparse: {token_id_str → max_weight} Dict für Qdrant SparseVector
         chunk_ids = encoded["input_ids"][0][tok_mask]  # CPU
@@ -474,23 +475,23 @@ def _embed_window(
                 key = str(tid)
                 if key not in sparse_dict or w > sparse_dict[key]:
                     sparse_dict[key] = w
-        chunk["sparse"] = sparse_dict
+        chunk.sparse = sparse_dict
 
         # ColBERT: Token-Slice der projizierten Vektoren
         colbert_mask = tok_mask[1:].to("cuda")
         if colbert_mask.any():
-            chunk["colbert"] = colbert_all[colbert_mask].cpu().tolist()
+            chunk.colbert = colbert_all[colbert_mask].cpu().tolist()
         else:
             # Fallback: Dense-Vec durch colbert_linear
             fallback = colbert_linear(dense_vec)
             fallback = torch.nn.functional.normalize(fallback.unsqueeze(0), p=2, dim=-1)
-            chunk["colbert"] = fallback.cpu().tolist()
+            chunk.colbert = fallback.cpu().tolist()
 
     del hidden, tok_weights, colbert_all, off_start, off_end, offset_mapping
     torch.cuda.empty_cache()
 
 
-def late_chunk_embed(model: Any, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def late_chunk_embed(model: Any, chunks: list[Chunk]) -> list[Chunk]:
     """Epic 3: Late Chunking – kontextualisiertes Multi-Vector Embedding.
 
     Kernidee (Jina AI, 2024):
@@ -511,7 +512,7 @@ def late_chunk_embed(model: Any, chunks: list[dict[str, Any]]) -> list[dict[str,
 
     Args:
         model: BGEM3FlagModel-Instanz.
-        chunks: Chunk-Dicts (werden in-place mit dense/sparse/colbert befüllt).
+        chunks: Chunk-Objekte (werden in-place mit dense/sparse/colbert befüllt).
 
     Returns:
         Dieselbe chunks-Liste mit eingebetteten Vektoren.
@@ -637,7 +638,7 @@ def build_qdrant_client() -> Any:
 
 def upsert_files_to_qdrant(
     client: Any,
-    files_with_chunks: list[tuple[Path, list[dict[str, Any]]]],
+    files_with_chunks: list[tuple[Path, list[Chunk]]],
     domain: str,
 ) -> None:
     """Schreibt Chunks pro Quelldatei nach Qdrant — gleiches Payload-Schema wie der Service.
@@ -737,7 +738,7 @@ def read_markdown(file_path: Path) -> tuple[str, dict[str, Any]]:
     return content, meta
 
 
-def late_chunk_and_embed(content: str, model: Any) -> list[dict[str, Any]]:
+def late_chunk_and_embed(content: str, model: Any) -> list[Chunk]:
     """Kombiniert chunk_markdown + late_chunk_embed für Markdown-Content.
 
     Convenience-Wrapper für den Service-Pfad. Das Modell wird übergeben
@@ -758,7 +759,7 @@ def late_chunk_and_embed(content: str, model: Any) -> list[dict[str, Any]]:
 
 
 def make_point(
-    chunk: dict[str, Any],
+    chunk: Chunk,
     file_path: Path,
     domain: str,
     run_id: str,
@@ -769,7 +770,7 @@ def make_point(
     Setzt source_path, domain, run_id und content_hash im Payload.
 
     Args:
-        chunk:        Chunk-Dict mit dense/sparse/colbert-Vektoren.
+        chunk:        Chunk mit befüllten dense/sparse/colbert-Vektoren.
         file_path:    Absoluter Pfad der ingestierten Datei (source_path im Payload).
         domain:       Domain-Label.
         run_id:       UUID dieses Ingest-Runs (für Upsert-before-Delete-Pattern).
@@ -777,32 +778,38 @@ def make_point(
 
     Returns:
         PointStruct bereit für qdrant_client.upsert().
+
+    Raises:
+        ValueError: Wenn der Chunk noch keine Embeddings trägt.
     """
     from qdrant_client.models import PointStruct, SparseVector
 
     from titan.utils import stable_uuid
 
-    sparse_raw: dict[str, Any] = chunk["sparse"]
+    if chunk.dense is None or chunk.sparse is None or chunk.colbert is None:
+        raise ValueError("Chunk ohne Embeddings — late_chunk_embed() zuerst aufrufen.")
+
+    # int(float(k)): FlagEmbedding gibt Keys manchmal als "1024.0" zurück
     sparse_vec = SparseVector(
-        indices=[int(float(k)) for k in sparse_raw],
-        values=[float(v) for v in sparse_raw.values()],
+        indices=[int(float(k)) for k in chunk.sparse],
+        values=[float(v) for v in chunk.sparse.values()],
     )
 
     source_str = str(file_path)
     return PointStruct(
-        id=stable_uuid(source_str, chunk.get("chunk_id", 0)),
+        id=stable_uuid(source_str, chunk.chunk_id),
         vector={
-            "dense": chunk["dense"],
+            "dense": chunk.dense,
             "sparse": sparse_vec,
-            "colbert": chunk["colbert"],
+            "colbert": chunk.colbert,
         },
         payload={
-            "text": chunk.get("text", ""),
+            "text": chunk.text,
             "source": source_str,
             "source_path": source_str,  # Alias für Service-Queries
-            "chunk_id": chunk.get("chunk_id", 0),
-            "chunk_offset": chunk.get("chunk_id", 0),  # Alias für Service-Schema
-            "header": chunk.get("header", ""),
+            "chunk_id": chunk.chunk_id,
+            "chunk_offset": chunk.chunk_id,  # Alias für Service-Schema
+            "header": chunk.header,
             "domain": domain,
             "run_id": run_id,
             "content_hash": content_hash,
@@ -885,8 +892,8 @@ def main() -> None:
         sys.exit(1)
 
     # ── Phase 2b: Header-basiertes Chunking (Datei-Zuordnung für run_id-Delete) ──
-    files_with_chunks: list[tuple[Path, list[dict[str, Any]]]] = []
-    all_chunks: list[dict[str, Any]] = []
+    files_with_chunks: list[tuple[Path, list[Chunk]]] = []
+    all_chunks: list[Chunk] = []
     for path, markdown in parsed:
         chunks = chunk_markdown(markdown, path)
         if chunks:

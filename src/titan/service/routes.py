@@ -1,7 +1,9 @@
 """
 routes.py – FastAPI Router mit allen Endpoints
 ===============================================
-Wird von app.py via include_router eingebunden.
+Wird von app.py via include_router eingebunden. Qdrant-Zugriffe laufen über
+titan.service.repository.QdrantRepository — die Routes enthalten nur noch
+HTTP-Validierung, Locking und Response-Mapping.
 
 Endpoints:
     GET  /health                    – Service-Status, BGE-M3 und Qdrant-Verfügbarkeit
@@ -29,6 +31,7 @@ import torch
 from fastapi import APIRouter, HTTPException
 
 from titan.config import settings
+from titan.service.repository import NoteAggregate, QdrantRepository
 from titan.service.schemas import (
     Chunk,
     DeleteChunksResponse,
@@ -58,6 +61,31 @@ COLLECTION_NAME: str = settings.collection_name
 router = APIRouter()
 
 
+def _repo() -> QdrantRepository:
+    """Repository über dem injizierten Client — wirft 503 wenn Qdrant fehlt.
+
+    Pro Request konstruiert (nur eine Referenz + Name, kein Zustand), damit
+    Tests weiter state.qdrant_client setzen und COLLECTION_NAME patchen können.
+    """
+    if state.qdrant_client is None:
+        raise HTTPException(503, "Service nicht bereit")
+    return QdrantRepository(state.qdrant_client, COLLECTION_NAME)
+
+
+def _to_notes_response(aggregates: list[NoteAggregate]) -> NotesResponse:
+    """Mappt Repository-Aggregate auf das API-Schema."""
+    notes = [
+        NoteInfo(
+            source_path=a.source_path,
+            domain=a.domain,
+            chunk_count=a.chunk_count,
+            content_hash=a.content_hash,
+        )
+        for a in aggregates
+    ]
+    return NotesResponse(notes=notes, total=len(notes))
+
+
 # ─── Health ──────────────────────────────────────────────────────────────────
 
 
@@ -74,11 +102,7 @@ def health() -> HealthResponse:
 
     qdrant_reachable = False
     if state.qdrant_client is not None:
-        try:
-            state.qdrant_client.get_collection(COLLECTION_NAME)
-            qdrant_reachable = True
-        except Exception:
-            qdrant_reachable = False
+        qdrant_reachable = QdrantRepository(state.qdrant_client, COLLECTION_NAME).collection_ready()
 
     vram_used_mb: int | None = None
     if bge_loaded and state.bge_model is not None:
@@ -228,43 +252,6 @@ def _path_check(raw: str) -> Path:
     return p
 
 
-def _count_chunks_for_path(file_path: Path) -> int:
-    """Zählt Chunks einer Datei in Qdrant."""
-    if state.qdrant_client is None:
-        return 0
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    count_result = state.qdrant_client.count(
-        collection_name=COLLECTION_NAME,
-        count_filter=Filter(
-            must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))]
-        ),
-        exact=True,
-    )
-    return int(count_result.count)
-
-
-def _stored_content_hash(file_path: Path) -> str | None:
-    """Liest den content_hash der indexierten Version einer Datei (oder None)."""
-    if state.qdrant_client is None:
-        return None
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    records, _ = state.qdrant_client.scroll(
-        collection_name=COLLECTION_NAME,
-        scroll_filter=Filter(
-            must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))]
-        ),
-        limit=1,
-        with_payload=["content_hash"],
-        with_vectors=False,
-    )
-    if not records:
-        return None
-    value = (records[0].payload or {}).get("content_hash")
-    return str(value) if value else None
-
-
 @router.post("/ingest/file", response_model=IngestResponse)
 def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
     """Indexiert eine Markdown-Datei (Upsert-before-Delete mit run_id).
@@ -273,10 +260,12 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
     zwei verzahnte Ingests derselben Datei würden sich sonst über das
     run_id-Delete gegenseitig die frischen Chunks löschen.
     """
-    if state.bge_model is None or state.qdrant_client is None:
+    if state.bge_model is None:
         raise HTTPException(503, "Service nicht bereit")
+    repo = _repo()
 
     file_path = _path_check(req.file_path)
+    source = str(file_path)
     t0 = time.perf_counter()
 
     if file_path.suffix.lower() == ".pdf":
@@ -303,20 +292,13 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
     with state.work_lock:
         # indexed:false → alte Chunks löschen, kein Neu-Ingest
         if meta.get("_skip"):
-            n_old = _count_chunks_for_path(file_path)
-            from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-            state.qdrant_client.delete(
-                collection_name=COLLECTION_NAME,
-                points_selector=Filter(
-                    must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))]
-                ),
-            )
+            n_old = repo.count_chunks(source)
+            repo.delete_by_source(source)
             domain_val: str | None = meta.get("domain")
             if domain_val and domain_val in state.domain_counts:
                 state.domain_counts[domain_val] = max(0, state.domain_counts[domain_val] - n_old)
             return IngestResponse(
-                file_path=str(file_path),
+                file_path=source,
                 domain=None,
                 chunks_deleted=n_old,
                 chunks_created=0,
@@ -333,9 +315,9 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         # Re-Embed. Der Watcher feuert auch bei reinen Metadaten-Events
         # (Syncthing-Rename, Editor-Save ohne Änderung); ohne den Skip kostet
         # jeder davon einen vollen GPU-Durchlauf. force=True erzwingt Re-Ingest.
-        if not req.force and _stored_content_hash(file_path) == content_hash:
+        if not req.force and repo.stored_content_hash(source) == content_hash:
             return IngestResponse(
-                file_path=str(file_path),
+                file_path=source,
                 domain=domain,
                 chunks_deleted=0,
                 chunks_created=0,
@@ -351,25 +333,10 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         new_chunks = late_chunk_and_embed(content, model=state.bge_model)
 
         # Count BEFORE upsert so chunks_deleted reflects the true size of the previous version.
-        n_before = _count_chunks_for_path(file_path)
+        n_before = repo.count_chunks(source)
 
-        from qdrant_client.models import PointStruct
-
-        points: list[PointStruct] = [
-            make_point(c, file_path, domain, run_id, content_hash) for c in new_chunks
-        ]
-        state.qdrant_client.upsert(collection_name=COLLECTION_NAME, points=points)
-
-        # Delete old chunks (different run_id) for the same file.
-        from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-        state.qdrant_client.delete(
-            collection_name=COLLECTION_NAME,
-            points_selector=Filter(
-                must=[FieldCondition(key="source_path", match=MatchValue(value=str(file_path)))],
-                must_not=[FieldCondition(key="run_id", match=MatchValue(value=run_id))],
-            ),
-        )
+        repo.upsert([make_point(c, file_path, domain, run_id, content_hash) for c in new_chunks])
+        repo.delete_stale_runs(source, keep_run_id=run_id)
 
         # Domain-Counter aktualisieren (A10: Cache-Invalidierung folgt nach diesem Block)
         state.domain_counts[domain] = (
@@ -384,7 +351,7 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         state.last_ingest_at = time.monotonic()  # for GET /stats "last ingest age"
 
     return IngestResponse(
-        file_path=str(file_path),
+        file_path=source,
         domain=domain,
         chunks_deleted=n_before,
         chunks_created=len(new_chunks),
@@ -399,40 +366,15 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
 @router.post("/find_related", response_model=FindRelatedResponse)
 def find_related_endpoint(req: FindRelatedRequest) -> FindRelatedResponse:
     """Findet semantisch ähnliche Notes via Dense-Vektor des ersten Chunks."""
-    if state.qdrant_client is None:
-        raise HTTPException(503, "Service nicht bereit")
-
+    repo = _repo()
     src_path = _path_check(req.file_path)
     t0 = time.perf_counter()
 
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    records, _ = state.qdrant_client.scroll(
-        collection_name=COLLECTION_NAME,
-        scroll_filter=Filter(
-            must=[FieldCondition(key="source_path", match=MatchValue(value=str(src_path)))]
-        ),
-        limit=1,
-        with_vectors=True,
-        with_payload=True,
-    )
-    if not records:
+    dense_vec = repo.first_dense_vector(str(src_path))
+    if dense_vec is None:
         raise HTTPException(404, f"Keine Chunks für: {src_path}")
 
-    anchor = records[0]
-    raw_vector = anchor.vector
-    dense_vec = raw_vector["dense"] if isinstance(raw_vector, dict) else raw_vector
-
-    results = state.qdrant_client.query_points(
-        collection_name=COLLECTION_NAME,
-        query=dense_vec,
-        using="dense",
-        limit=req.top_k,
-        query_filter=Filter(
-            must_not=[FieldCondition(key="source_path", match=MatchValue(value=str(src_path)))]
-        ),
-        with_payload=True,
-    )
+    hits = repo.find_similar(dense_vec, top_k=req.top_k, exclude_source=str(src_path))
 
     related = [
         Chunk(
@@ -447,7 +389,7 @@ def find_related_endpoint(req: FindRelatedRequest) -> FindRelatedResponse:
                 if k not in {"text", "source_path", "domain", "chunk_offset"}
             },
         )
-        for r in results.points
+        for r in hits
     ]
 
     return FindRelatedResponse(
@@ -463,136 +405,37 @@ def find_related_endpoint(req: FindRelatedRequest) -> FindRelatedResponse:
 @router.delete("/chunks", response_model=DeleteChunksResponse)
 def delete_chunks(source_path: str) -> DeleteChunksResponse:
     """Löscht alle Chunks einer Datei. Aktualisiert Domain-Counter."""
-    if state.qdrant_client is None:
-        raise HTTPException(503, "Service nicht bereit")
-
+    repo = _repo()
     path = _path_check(source_path)
-
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
+    source = str(path)
 
     with state.work_lock:
-        n = _count_chunks_for_path(path)
-
+        n = repo.count_chunks(source)
         # Domain vor dem Löschen ermitteln (für Counter-Update)
-        records, _ = state.qdrant_client.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=Filter(
-                must=[FieldCondition(key="source_path", match=MatchValue(value=str(path)))]
-            ),
-            limit=1,
-            with_payload=["domain"],
-            with_vectors=False,
-        )
-        domain_to_update: str | None = None
-        if records:
-            domain_to_update = (records[0].payload or {}).get("domain")
-
-        state.qdrant_client.delete(
-            collection_name=COLLECTION_NAME,
-            points_selector=Filter(
-                must=[FieldCondition(key="source_path", match=MatchValue(value=str(path)))]
-            ),
-        )
+        domain_to_update = repo.domain_of(source)
+        repo.delete_by_source(source)
 
         if domain_to_update and domain_to_update in state.domain_counts:
             state.domain_counts[domain_to_update] = max(
                 0, state.domain_counts[domain_to_update] - n
             )
 
-    return DeleteChunksResponse(source_path=str(path), chunks_deleted=n)
+    return DeleteChunksResponse(source_path=source, chunks_deleted=n)
 
 
-# ─── Notes (A11) ─────────────────────────────────────────────────────────────
+# ─── Notes (A11 + A12) ───────────────────────────────────────────────────────
 
 
 @router.get("/notes", response_model=NotesResponse)
 def list_notes() -> NotesResponse:
-    """Listet alle indexierten Notes, gruppiert nach source_path.
-
-    Scrollt die gesamte Collection und aggregiert pro Datei die Chunk-Anzahl
-    und Domain. Für einen persönlichen Vault (einige hundert/tausend Chunks)
-    unkritisch.
-    """
-    if state.qdrant_client is None:
-        raise HTTPException(503, "Service nicht bereit")
-
-    counts: dict[str, int] = {}
-    domains: dict[str, str] = {}
-    hashes: dict[str, str | None] = {}
-    offset = None
-    while True:
-        records, offset = state.qdrant_client.scroll(
-            collection_name=COLLECTION_NAME,
-            limit=256,
-            offset=offset,
-            with_payload=["source_path", "domain", "content_hash"],
-            with_vectors=False,
-        )
-        for record in records:
-            payload = record.payload or {}
-            source_path = str(payload.get("source_path", ""))
-            if not source_path:
-                continue
-            counts[source_path] = counts.get(source_path, 0) + 1
-            domains.setdefault(source_path, str(payload.get("domain", "")))
-            hashes.setdefault(source_path, payload.get("content_hash"))
-        if offset is None:
-            break
-
-    notes = [
-        NoteInfo(
-            source_path=sp, domain=domains[sp], chunk_count=counts[sp], content_hash=hashes[sp]
-        )
-        for sp in sorted(counts)
-    ]
-    return NotesResponse(notes=notes, total=len(notes))
-
-
-# ─── Domain Notes (A12) ──────────────────────────────────────────────────────
+    """Listet alle indexierten Notes, gruppiert nach source_path."""
+    return _to_notes_response(_repo().aggregate_notes())
 
 
 @router.get("/domains/{domain}/notes", response_model=NotesResponse)
 def list_domain_notes(domain: str) -> NotesResponse:
     """Listet alle Notes der angegebenen Domain, gruppiert nach source_path.
 
-    Filtert die Collection via Qdrant scroll_filter auf das domain-Payload-Feld.
     Unbekannte / leere Domains geben 200 mit notes=[], total=0 zurück (kein 404).
     """
-    if state.qdrant_client is None:
-        raise HTTPException(503, "Service nicht bereit")
-
-    from qdrant_client.models import FieldCondition, Filter, MatchValue
-
-    counts: dict[str, int] = {}
-    domains: dict[str, str] = {}
-    hashes: dict[str, str | None] = {}
-    offset = None
-    while True:
-        records, offset = state.qdrant_client.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=Filter(
-                must=[FieldCondition(key="domain", match=MatchValue(value=domain))]
-            ),
-            limit=256,
-            offset=offset,
-            with_payload=["source_path", "domain", "content_hash"],
-            with_vectors=False,
-        )
-        for record in records:
-            payload = record.payload or {}
-            source_path = str(payload.get("source_path", ""))
-            if not source_path:
-                continue
-            counts[source_path] = counts.get(source_path, 0) + 1
-            domains.setdefault(source_path, str(payload.get("domain", "")))
-            hashes.setdefault(source_path, payload.get("content_hash"))
-        if offset is None:
-            break
-
-    notes = [
-        NoteInfo(
-            source_path=sp, domain=domains[sp], chunk_count=counts[sp], content_hash=hashes[sp]
-        )
-        for sp in sorted(counts)
-    ]
-    return NotesResponse(notes=notes, total=len(notes))
+    return _to_notes_response(_repo().aggregate_notes(domain=domain))

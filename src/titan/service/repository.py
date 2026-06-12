@@ -1,0 +1,198 @@
+"""
+repository.py – Qdrant-Zugriff des Service als Repository
+===========================================================
+Kapselt alle Qdrant-Filter-/Scroll-Konstruktionen der Routes an einer Stelle.
+Vorher wiederholten die Endpoints sechsfach denselben Lazy-Import von
+FieldCondition/Filter/MatchValue, und die Scroll-Aggregation für /notes
+existierte zweimal (list_notes / list_domain_notes, ~90 % identisch).
+
+Bewusst leichtgewichtig: das Repository wird pro Request konstruiert (nur
+Client-Referenz + Collection-Name, kein eigener Zustand), damit Tests weiter
+einfach state.qdrant_client injizieren und COLLECTION_NAME patchen können.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass
+class NoteAggregate:
+    """Aggregierte Sicht auf eine indexierte Note (für /notes)."""
+
+    source_path: str
+    domain: str
+    chunk_count: int
+    content_hash: str | None
+
+
+class QdrantRepository:
+    """Dünner, service-spezifischer Wrapper um den QdrantClient."""
+
+    def __init__(self, client: Any, collection: str) -> None:
+        self._client = client
+        self._collection = collection
+
+    # ── intern ────────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _source_filter(source_path: str, exclude_run_id: str | None = None) -> Any:
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        # list[Any]: mypy-Listeninvarianz vs. Qdrants breite Condition-Union
+        must_not: list[Any] | None = None
+        if exclude_run_id:
+            must_not = [FieldCondition(key="run_id", match=MatchValue(value=exclude_run_id))]
+        return Filter(
+            must=[FieldCondition(key="source_path", match=MatchValue(value=source_path))],
+            must_not=must_not,
+        )
+
+    # ── Health / Counts ───────────────────────────────────────────────────
+
+    def collection_ready(self) -> bool:
+        """True wenn die Collection erreichbar ist (für /health)."""
+        try:
+            self._client.get_collection(self._collection)
+            return True
+        except Exception:
+            return False
+
+    def count_chunks(self, source_path: str) -> int:
+        """Exakte Chunk-Anzahl einer Datei."""
+        result = self._client.count(
+            collection_name=self._collection,
+            count_filter=self._source_filter(source_path),
+            exact=True,
+        )
+        return int(result.count)
+
+    # ── Einzel-Lookups ────────────────────────────────────────────────────
+
+    def _first_payload(self, source_path: str, fields: list[str]) -> dict[str, Any] | None:
+        records, _ = self._client.scroll(
+            collection_name=self._collection,
+            scroll_filter=self._source_filter(source_path),
+            limit=1,
+            with_payload=fields,
+            with_vectors=False,
+        )
+        if not records:
+            return None
+        return dict(records[0].payload or {})
+
+    def stored_content_hash(self, source_path: str) -> str | None:
+        """content_hash der indexierten Version einer Datei (oder None)."""
+        payload = self._first_payload(source_path, ["content_hash"])
+        if payload is None:
+            return None
+        value = payload.get("content_hash")
+        return str(value) if value else None
+
+    def domain_of(self, source_path: str) -> str | None:
+        """Domain der indexierten Datei (oder None wenn nicht indexiert)."""
+        payload = self._first_payload(source_path, ["domain"])
+        if payload is None:
+            return None
+        value = payload.get("domain")
+        return str(value) if value else None
+
+    def first_dense_vector(self, source_path: str) -> Any | None:
+        """Dense-Vektor des ersten Chunks einer Datei (Anchor für /find_related)."""
+        records, _ = self._client.scroll(
+            collection_name=self._collection,
+            scroll_filter=self._source_filter(source_path),
+            limit=1,
+            with_vectors=True,
+            with_payload=False,
+        )
+        if not records:
+            return None
+        raw = records[0].vector
+        return raw["dense"] if isinstance(raw, dict) else raw
+
+    # ── Mutationen ────────────────────────────────────────────────────────
+
+    def upsert(self, points: list[Any]) -> None:
+        self._client.upsert(collection_name=self._collection, points=points)
+
+    def delete_by_source(self, source_path: str) -> None:
+        """Löscht alle Chunks einer Datei."""
+        self._client.delete(
+            collection_name=self._collection,
+            points_selector=self._source_filter(source_path),
+        )
+
+    def delete_stale_runs(self, source_path: str, keep_run_id: str) -> None:
+        """Löscht alle Chunks einer Datei, die NICHT zur run_id gehören."""
+        self._client.delete(
+            collection_name=self._collection,
+            points_selector=self._source_filter(source_path, exclude_run_id=keep_run_id),
+        )
+
+    # ── Suche / Aggregation ───────────────────────────────────────────────
+
+    def find_similar(self, dense_vector: Any, top_k: int, exclude_source: str) -> list[Any]:
+        """Dense-Suche, exklusive der Quelldatei selbst (für /find_related)."""
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        results = self._client.query_points(
+            collection_name=self._collection,
+            query=dense_vector,
+            using="dense",
+            limit=top_k,
+            query_filter=Filter(
+                must_not=[FieldCondition(key="source_path", match=MatchValue(value=exclude_source))]
+            ),
+            with_payload=True,
+        )
+        return list(results.points)
+
+    def aggregate_notes(self, domain: str | None = None) -> list[NoteAggregate]:
+        """Scrollt die Collection und aggregiert pro source_path.
+
+        Für einen persönlichen Vault (einige hundert/tausend Chunks)
+        unkritisch; bei deutlichem Wachstum auf Qdrant-Facets umstellen (P2.4).
+        """
+        from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+        scroll_filter = None
+        if domain is not None:
+            scroll_filter = Filter(
+                must=[FieldCondition(key="domain", match=MatchValue(value=domain))]
+            )
+
+        counts: dict[str, int] = {}
+        domains: dict[str, str] = {}
+        hashes: dict[str, str | None] = {}
+        offset = None
+        while True:
+            records, offset = self._client.scroll(
+                collection_name=self._collection,
+                scroll_filter=scroll_filter,
+                limit=256,
+                offset=offset,
+                with_payload=["source_path", "domain", "content_hash"],
+                with_vectors=False,
+            )
+            for record in records:
+                payload = record.payload or {}
+                source_path = str(payload.get("source_path", ""))
+                if not source_path:
+                    continue
+                counts[source_path] = counts.get(source_path, 0) + 1
+                domains.setdefault(source_path, str(payload.get("domain", "")))
+                hashes.setdefault(source_path, payload.get("content_hash"))
+            if offset is None:
+                break
+
+        return [
+            NoteAggregate(
+                source_path=sp,
+                domain=domains[sp],
+                chunk_count=counts[sp],
+                content_hash=hashes[sp],
+            )
+            for sp in sorted(counts)
+        ]
