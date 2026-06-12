@@ -10,6 +10,59 @@
 
 ## Pending
 
+- [ ] **2026-06-12: /notes-Aggregation auf Qdrant-Facets oder Registry umstellen (Review P2.4).**
+      `QdrantRepository.aggregate_notes()` scrollt die gesamte Collection und aggregiert
+      in Python — O(N) pro Aufruf. Bei heutiger Vault-Größe unkritisch; ab einigen
+      zehntausend Chunks auf die Qdrant-Facet-API umstellen oder eine kleine
+      Notes-Registry (SQLite) pflegen — Letzteres löst auch den domain_counts-Drift,
+      wenn CLI-Ingests am Service vorbei laufen. Referenz:
+      `~/projects/rag-workspace/docs/ai/plans/2026-06-12_architecture-review.md` (P2.4).
+      *Effort: Medium. Trigger: Vault-Wachstum, nicht Kalender.*
+
+- [ ] **2026-06-12: Property-based Tests für _split_text via hypothesis (Review P3.2).**
+      `tests/titan/test_chunking.py` deckt die Overlap-Invarianten mit festen Beispielen
+      ab; hypothesis würde sie generativ prüfen ("Sub-Chunks ohne Overlap ergeben den
+      Originaltext", "kein Sub-Chunk > MAX_SUPER_CHUNK_CHARS") und Randfälle an
+      Wortgrenzen/Separator-Fallbacks finden. Neue dev-Dependency `hypothesis`.
+      Referenz: Plan P3.2. *Effort: Low.*
+
+- [ ] **2026-06-12: Request-ID-Korrelation titan ↔ brain-mcp (Review P3.3).**
+      X-Request-ID-Middleware in titan + Durchreichen im TitanClient, damit sich ein
+      MCP-Call durch beide Journals verfolgen lässt. Erst sinnvoll, wenn Debugging über
+      Service-Grenzen hinweg real Zeit kostet. Referenz: Plan P3.3. *Effort: Medium.*
+
+- [x] **2026-06-06: Content-hash skip — short-circuit unchanged re-ingests.**
+      ✅ Umgesetzt 2026-06-12 (Commit f0602ce, Review-Session): `skipped_reason:
+      "unchanged"`, `force=true` umgeht den Skip, `indexed: false` bleibt geehrt.
+      `ingest_file_endpoint` re-embeds the full file on every call, even when the raw
+      bytes are identical to what's already indexed. `content_hash` (sha256 of the raw
+      file) is already computed and stored in the payload but only used for reconcile —
+      not to skip work. Add an early-return at the top of the ingest path: cheaply read
+      the stored hash for that `source_path` (one `scroll`, `with_payload=["content_hash"]`,
+      `limit=1`), compare against the freshly computed hash, and return early (chunks
+      unchanged) if they match. Why it matters: the watcher re-fires on touch/metadata
+      events (Syncthing rename-delivery, editor saves that don't change content), and
+      each spurious trigger currently costs a full Docling→chunk→GPU-embed pass under
+      the GPU lock. Bonus: this finally gives the `force` flag a real meaning
+      (`force=True` bypasses the skip). Must still honour `indexed: false`. Effort: Low.
+
+- [ ] **2026-06-06: Near-duplicate suppression at retrieval time.** RRF already
+      dedups *exact* same-chunk hits across sub-queries (keyed on point ID), but there's
+      no suppression of *near*-duplicates — two different IDs whose text is almost
+      identical can both land in the top-k. The one real source of this in the current
+      pipeline is `_split_text`: sections over `MAX_SUPER_CHUNK_CHARS` (24k) are split
+      into sub-chunks with `OVERLAP_CHARS` (4k) of overlap, so adjacent sub-chunks share
+      text and can both rank when a query hits the overlap region. Cheapest fix first (do
+      NOT jump straight to MMR): a post-filter on the final result set that collapses
+      adjacent chunks of the same `source` with consecutive `chunk_id`, keeping the
+      higher-scored one (or merging their text). Only escalate to real diversity
+      reranking — MMR (maximal marginal relevance) or a cosine-similarity threshold on
+      the retrieved set — if the cheap post-filter proves insufficient. Why not now: at
+      ~14 notes with header-based chunking, chunks are mostly distinct sections and
+      near-dups are rare; this is complexity for a problem that barely exists yet.
+      Revisit only if duplicate-ish hits actually show up in results (most likely from
+      large, overlap-split documents). Effort: Low (post-filter) → Medium (MMR).
+
 - [ ] **2026-05-31: Wikilink-aware retrieval (link graph).** Parse `[[wikilinks]]`
       from notes and use the vault's manual link structure to improve retrieval.
       Manual links are high-quality human signal ("these belong together") that pure
