@@ -224,6 +224,8 @@ Reasoning-Modell schreibt Pläne nach `docs/ai/plans/`, ein günstigeres Modell
 implementiert sie; `CLAUDE.md` (gespiegelt als `AGENTS.md`/`GEMINI.md`) ist der
 Einstiegspunkt für jeden Agenten.
 
+🇬🇧 An English version of this README is available at [README.md](README.md).
+
 ## Lizenz
 
 MIT — siehe [LICENSE](LICENSE).
