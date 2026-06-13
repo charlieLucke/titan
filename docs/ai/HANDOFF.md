@@ -72,7 +72,7 @@ through the brain-mcp server.
   again).
 - Status: **implemented.** brain-mcp runs as an HTTP daemon (`127.0.0.1:9100`) behind
   `tailscale funnel` (public), secured by a GitHub OAuth proxy with a login allowlist.
-  Wired into Claude as the custom connector `https://charliespc.taild04050.ts.net/mcp`;
+  Wired into Claude as the custom connector `https://<your-tailnet-host>.ts.net/mcp`;
   verified end-to-end (`query_knowledge` returns vault hits). Details in the brain-mcp
   repo: `docs/ai/DECISIONS.md` and `docs/ai/HANDOFF.md` (both 2026-05-16).
 - **Nothing was changed** in titan itself for this. titan-service stays on
