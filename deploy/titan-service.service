@@ -4,13 +4,13 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/charl/projects/titan
-ExecStart=/home/charl/projects/titan/.venv/bin/python -m titan service --port 8765
+WorkingDirectory=/home/<your-user>/projects/titan
+ExecStart=/home/<your-user>/projects/titan/.venv/bin/python -m titan service --port 8765
 Restart=on-failure
 RestartSec=5
 Environment="PYTHONUNBUFFERED=1"
-StandardOutput=append:/home/charl/projects/titan/logs/service.log
-StandardError=append:/home/charl/projects/titan/logs/service.err.log
+StandardOutput=append:/home/<your-user>/projects/titan/logs/service.log
+StandardError=append:/home/<your-user>/projects/titan/logs/service.err.log
 
 [Install]
 WantedBy=default.target
