@@ -1,28 +1,120 @@
 # titan
 
-Ein lokales, hochperformantes RAG-System, das vollständig auf einer einzigen
-Workstation läuft — keine Cloud, keine API-Keys, ein einzelner Nutzer. Es
-indexiert PDFs und Markdown-Notizen und beantwortet Anfragen in natürlicher
-Sprache darüber. Es ist das Retrieval-Backend hinter `brain-mcp`,
-`brain-dashboard` und `obsidian-inbox-watcher`.
+**Lokales RAG-System auf einer einzelnen Workstation: indexiert PDFs und
+Markdown-Notizen multi-vektoriell und beantwortet Fragen in natürlicher Sprache
+mit hybrider Suche + lokalem LLM — vollständig offline, ohne Cloud und ohne API-Keys.**
 
-## Funktionsweise
+titan ist die Such- und Retrieval-Engine eines kleinen, aus drei Diensten
+bestehenden Wissenssystems (siehe [Teil eines größeren Systems](#teil-eines-größeren-systems)).
 
+## Was ist RAG — und was hier besonders ist
+
+**RAG** (Retrieval-Augmented Generation) heißt: Statt ein Sprachmodell frei
+„aus dem Gedächtnis" antworten zu lassen, werden zuerst die *relevanten*
+Textstellen aus einer eigenen Dokumentensammlung gesucht und dem Modell als
+Kontext mitgegeben. Die Antwort ist dadurch belegbar und aktuell.
+
+Das Besondere an titan: Es läuft **komplett lokal** auf einer einzelnen GPU —
+kein OpenAI, kein Pinecone, keine Daten verlassen die Maschine. Statt einer
+einfachen Vektorsuche kombiniert es **drei** Retrieval-Signale pro Textstück
+(dichte, lexikalische und Token-genaue Ähnlichkeit) und führt sie über Reciprocal
+Rank Fusion zusammen — der entscheidende Qualitätshebel in einer RAG-Pipeline.
+
+## Architektur
+
+```mermaid
+flowchart TB
+    subgraph Ingest["Indexierung"]
+        PDF["PDF / Markdown"] --> P["Parsen<br/>(Docling / Frontmatter)"]
+        P --> LC["Late Chunking"]
+        LC --> EMB["BGE-M3 Embedding<br/>dense + sparse + ColBERT"]
+        EMB --> Q[("Qdrant<br/>Vektor-DB")]
+    end
+    subgraph Query["Abfrage"]
+        Qu["Frage"] --> DEC["Zerlegung (Phi-4)"]
+        DEC --> EMB2["BGE-M3"]
+        EMB2 --> SR["Hybrid-Suche + RRF<br/>+ ColBERT-Reranking"]
+        SR --> Q
+        SR --> CACHE["Semantic Cache"]
+        CACHE --> GEN["Phi-4 Antwortgenerierung"]
+    end
 ```
-PDF / Markdown ─▶ Parsen (Docling / Frontmatter) ─▶ Late Chunking
-              ─▶ BGE-M3 Embedding (dense + sparse + colbert) ─▶ Qdrant
-Query ─▶ Zerlegung (Phi-4) ─▶ BGE-M3 ─▶ Qdrant-Suche ─▶ RRF-Fusion
-      ─▶ (Semantic Cache) ─▶ Phi-4 Antwortgenerierung
+
+**Kernbausteine:**
+
+- **BGE-M3 Multi-Vektor-Embeddings** — drei Vektoren pro Chunk (dense + sparse +
+  ColBERT), statt nur einem. Deckt semantische, lexikalische und Token-genaue
+  Treffer ab.
+- **Late Chunking** — bettet den *gesamten* Dokumentkontext ein, bevor in Chunks
+  zerlegt wird, und erhält so die Bedeutung über Chunk-Grenzen hinweg.
+- **Hybrid Search mit Reciprocal Rank Fusion + ColBERT-MaxSim-Reranking** —
+  drei Rankings werden zu einem konsolidierten Ergebnis zusammengeführt.
+- **Phi-4 via Ollama** — zerlegt komplexe Fragen und generiert Antworten,
+  vollständig lokal.
+- **Qdrant** als Vektordatenbank (lokal, gRPC).
+- **FastAPI-Service** mit dauerhaft im VRAM gehaltenem Modell und einem
+  fcntl-basierten GPU-Lock, sodass kein Modell-Reload pro Anfrage nötig ist.
+- **Semantic Cache** für wiederkehrende Anfragen und **LLM-as-Judge-Evaluation**
+  (RAG-Triade) zur Qualitätsmessung.
+- **Robuste Neuindexierung** nach dem Prinzip *upsert-before-delete* (pro Lauf
+  eine `run_id`): alte Chunks werden atomar ersetzt, nie dupliziert, und ein
+  Absturz mitten im Update lässt den alten Stand durchsuchbar.
+
+## Beispiel
+
+Der Service läuft auf `127.0.0.1:8765` und wird über HTTP angesprochen:
+
+```bash
+curl -s localhost:8765/search -H 'content-type: application/json' -d '{
+  "query": "Wie funktioniert Late Chunking?",
+  "domain": "titan",
+  "top_k": 3
+}'
 ```
 
-- **Late Chunking** bettet den vollständigen Dokumentkontext ein, bevor gesplittet
-  wird, und erhält so die Bedeutung über Chunk-Grenzen hinweg.
-- **BGE-M3** erzeugt drei Vektoren pro Chunk (dense, sparse, colbert);
-  **Reciprocal Rank Fusion** führt die drei Rankings zusammen.
-- **Phi-4 via Ollama** zerlegt Anfragen und generiert Antworten — vollständig lokal.
-- Die Neuindexierung erfolgt nach dem Prinzip **upsert-before-delete**, verankert an
-  einer pro Lauf vergebenen `run_id`, sodass die alten Chunks einer Notiz atomar
-  ersetzt statt dupliziert werden.
+```jsonc
+{
+  "results": [
+    {
+      "text": "Late Chunking bettet den vollständigen Dokumentkontext ein, bevor …",
+      "source_path": "/vault/notes/rag/late-chunking.md",
+      "domain": "titan",
+      "score": 0.83
+    }
+    // … weitere Treffer, absteigend nach Score
+  ]
+}
+```
+
+Per CLI lässt sich Suche und Antwortgenerierung verketten:
+
+```bash
+python -m titan.search "Wie funktioniert Late Chunking?" --json | python -m titan.generate
+```
+
+## Teil eines größeren Systems
+
+titan ist der **RAG-Kern**. Zwei Schwester-Repos hängen davor und dahinter:
+
+```mermaid
+flowchart LR
+    OIW["obsidian-inbox-watcher<br/>Dokumente → Notizen"]
+    T["titan<br/>RAG-Engine (Index + Suche)"]
+    BM["brain-mcp<br/>MCP-Server für Claude"]
+    C(("Claude"))
+    OIW -->|".md-Notizen"| T
+    BM -->|"HTTP: /search, /ingest"| T
+    C <-->|"MCP-Tools"| BM
+    classDef here fill:#2b6cb0,stroke:#1a365d,color:#fff,stroke-width:2px;
+    class T here
+```
+
+- **[obsidian-inbox-watcher](https://github.com/charlieLucke/obsidian-inbox-watcher)** —
+  verwandelt eingeworfene PDFs/DOCX/URLs mit einem LLM in strukturierte
+  Markdown-Notizen (das Dokument-Frontend).
+- **titan** *(du bist hier)* — indexiert die Notizen und beantwortet Suchanfragen.
+- **[brain-mcp](https://github.com/charlieLucke/brain-mcp)** — bindet titan als
+  MCP-Server an Claude an (überwacht den Vault, stellt Such-Tools bereit).
 
 ## Stack
 
@@ -56,9 +148,8 @@ uv run python -m titan.tools.init_col   # Qdrant-Collection anlegen
 `OLLAMA_URL`/`OLLAMA_MODEL`, `INGEST_BASE_DIR`, `VAULT_ROOT` sowie die
 Cache-Einstellungen nach Bedarf anpassen. `VAULT_ROOT` / `INGEST_BASE_DIR` können
 beliebige Verzeichnisse sein — die Defaults in `.env.example` (`/mnt/f/...`) sind
-**Beispiele aus dem WSL2-Setup des Autors** (wo `/mnt/f` das Windows-Laufwerk `F:`
-ist); auf einem nativen Linux-System Pfade unterhalb deines Home-Verzeichnisses
-verwenden.
+Beispiele aus dem WSL2-Setup des Autors; auf einem nativen Linux-System Pfade
+unterhalb des Home-Verzeichnisses verwenden.
 
 ## Service starten
 
@@ -108,7 +199,7 @@ src/titan/
 └── tools/init_col.py  # Qdrant-Collection-Setup
 deploy/                # systemd-Service-Unit + Installationsanleitung
 tests/{titan,integration}/   # Unit- + Service-Integrationstests
-docs/ai/               # Kontext und Pläne für KI-Agenten
+docs/ai/               # Architektur, Entscheidungen und Pläne
 .github/workflows/     # CI-Konfiguration
 ```
 
@@ -124,27 +215,15 @@ docs/ai/               # Kontext und Pläne für KI-Agenten
 
 Alle Tools laufen bei jedem Push in der CI.
 
-## Arbeiten mit KI-Tools
+## Dokumentation & Entwickler-Workflow
 
-Dieses Projekt nutzt einen strukturierten Workflow für KI-gestütztes Coding. Jeder
-KI-Agent (Claude, Gemini, Cursor, Aider usw.) sollte zuerst `CLAUDE.md` lesen — sie
-ist als `AGENTS.md` und `GEMINI.md` für Tool-Kompatibilität gespiegelt.
-
-Wichtige Dateien für den KI-Kontext:
-
-- `docs/ai/CONTEXT.md` — Stack, Konventionen, Glossar
-- `docs/ai/CURRENT_TASK.md` — woran aktiv gearbeitet wird
-- `docs/ai/HANDOFF.md` — Zustand für die Fortsetzung von Sitzungen über Modellwechsel hinweg
-- `docs/ai/DECISIONS.md` — Protokoll der Architekturentscheidungen
-- `docs/ai/plans/` — gespeicherte Pläne, erstellt von einem Planungsmodell (z. B. Opus)
-
-Der vorgesehene Workflow:
-
-1. Architektur- und Feature-Pläne werden von einem starken Reasoning-Modell erstellt und unter `docs/ai/plans/` gespeichert
-2. Ein schnelleres/günstigeres Modell implementiert die Pläne
-3. Beide referenzieren den gemeinsamen Kontext in `docs/ai/`
-4. Der Zustand wird über `HANDOFF.md` über Sitzungen hinweg bewahrt
+Vertiefende Architektur- und Designentscheidungen liegen in
+[`docs/ai/`](docs/ai/) (Architektur, Entscheidungs-Log, Pläne). Diese Dateien
+dienen zugleich einem strukturierten KI-gestützten Entwicklungsworkflow: ein
+Reasoning-Modell schreibt Pläne nach `docs/ai/plans/`, ein günstigeres Modell
+implementiert sie; `CLAUDE.md` (gespiegelt als `AGENTS.md`/`GEMINI.md`) ist der
+Einstiegspunkt für jeden Agenten.
 
 ## Lizenz
 
-Noch offen (TBD)
+MIT — siehe [LICENSE](LICENSE).

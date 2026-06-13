@@ -8,7 +8,7 @@ Titan ist ein lokales, hochperformantes RAG-System (Retrieval-Augmented Generati
 auf einer einzigen Workstation. Es indexiert PDFs und Markdown-Dateien, zerlegt sie
 per Late Chunking in Chunks, bettet sie mit BGE-M3 ein (Multi-Vektor: dense +
 sparse + colbert), speichert sie in Qdrant und beantwortet Anfragen mit Reciprocal
-Rank Fusion + Phi-4 als Generator. Zielgruppe: ausschließlich persönlicher Gebrauch
+Rank Fusion + Phi-4 als Generator. Auslegung: Single-Workstation-Deployment
 (kein Mehrbenutzerbetrieb, kein Cloud-Deployment).
 
 ## Stack
