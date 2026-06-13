@@ -72,7 +72,7 @@ Die Claude-Desktop-Integration ist eingerichtet — sie läuft **nicht** direkt 
   wieder).
 - Status: **implementiert.** brain-mcp läuft als HTTP-Daemon (`127.0.0.1:9100`) hinter
   `tailscale funnel` (öffentlich), abgesichert durch einen GitHub-OAuth-Proxy mit Login-Allowlist.
-  In Claude als Custom Connector `https://charliespc.taild04050.ts.net/mcp` verdrahtet;
+  In Claude als Custom Connector `https://<your-tailnet-host>.ts.net/mcp` verdrahtet;
   end-to-end verifiziert (`query_knowledge` liefert Vault-Treffer). Details im brain-mcp-
   Repo: `docs/ai/DECISIONS.md` und `docs/ai/HANDOFF.md` (beide 2026-05-16).
 - **An titan selbst wurde nichts geändert.** titan-service bleibt auf

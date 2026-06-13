@@ -108,6 +108,7 @@ Siehe `.env.example` für alle Variablen. Die wichtigsten:
 - `QDRANT_HOST`, `QDRANT_GRPC_PORT`, `COLLECTION_NAME`
 - `GPU_LOCK_PATH` — Default `/tmp/bge_m3.lock`
 - `INGEST_BASE_DIR` — Eingabeverzeichnis für PDFs, Default `/mnt/f/data/titan-input`
+  (Beispiel aus dem WSL2-Setup des Autors; beliebig wählbar)
 - `OLLAMA_URL`, `OLLAMA_MODEL` — Phi-4 via Ollama
 - `CACHE_ENABLED`, `CACHE_COLLECTION_NAME` — Epic-5B Semantic Cache
 
@@ -144,4 +145,5 @@ Siehe `.env.example` für alle Variablen. Die wichtigsten:
   Kein GPU-Lock pro Request nötig, da der Service das Lock beim Start erwirbt.
 - **CLI-Pfad:** direkter Aufruf (`python -m titan.search`). Lädt BGE-M3 selbst, erwirbt das GPU-Lock.
 - **VAULT_ROOT:** Basisverzeichnis des Obsidian-Vaults. Alle Service-Pfade müssen darunter
-  liegen (Schutz vor Path-Traversal). Default: `/mnt/f/vault`.
+  liegen (Schutz vor Path-Traversal). Default: `/mnt/f/vault` (Beispiel; auf nativem Linux
+  z. B. `~/vault`).
