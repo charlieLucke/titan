@@ -10,7 +10,20 @@
 
 ## Ausstehend
 
-- [ ] **2026-06-12: /notes-Aggregation auf Qdrant-Facets oder Registry umstellen (Review P2.4).**
+- [ ] **2026-06-14: Ingest-500, wenn der Multivektor eines Chunks Qdrants 1-MiB-Pro-Punkt-gRPC-Limit sprengt.**
+      BGE-M3-ColBERT erzeugt einen 1024-dim-Vektor pro Token, sodass schon ein ~256+-Token-Chunk
+      1 048 576 Bytes überschreitet. `repository.upsert()` wirft dann
+      `grpc._channel._InactiveRpcError: INVALID_ARGUMENT („Total size of all vectors (N) must be
+      less than 1048576")` und der **ganze** Batch scheitert → die Notiz wird nie indexiert und
+      brain-watcher loopt darauf (5 Retries, dann probiert es der Reconcile endlos erneut).
+      Beobachtet an einer großen Vault-Notiz (Chunk #5 ≈ 1,94 MB). Fix-Optionen, billigste zuerst:
+      (a) **graceful** — Punkte einzeln / in Sub-Batches upserten und einen zu großen Punkt
+      überspringen + warnen, statt den ganzen Ingest mit 500 zu killen (kleinste, robusteste
+      Lösung; der Rest der Notiz bleibt indexiert); (b) **kappen** — ColBERT-Tokenzahl / max-Chunk-
+      Größe begrenzen, sodass ein Punkt < 1 MiB bleibt; (c) Qdrants gRPC-max-message-size anheben
+      (Server `service.*` + Client `grpc_options`) — schiebt nur die Grenze. Repro: jede Notiz mit
+      einem dichten ≥256-Token-Chunk. Ref: `service/routes.py:338` → `service/repository.py:118`.
+      *Aufwand: Low (a) → Medium (b).*
       `QdrantRepository.aggregate_notes()` scrollt die gesamte Collection und aggregiert
       in Python — O(N) pro Aufruf. Bei heutiger Vault-Größe unkritisch; ab einigen
       zehntausend Chunks auf die Qdrant-Facet-API umstellen oder eine kleine

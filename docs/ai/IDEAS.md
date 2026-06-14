@@ -10,7 +10,20 @@
 
 ## Pending
 
-- [ ] **2026-06-12: /notes-Aggregation auf Qdrant-Facets oder Registry umstellen (Review P2.4).**
+- [ ] **2026-06-14: Ingest 500 when a chunk's multi-vector exceeds Qdrant's 1 MiB per-point gRPC limit.**
+      BGE-M3 ColBERT emits one 1024-d vector per token, so a chunk of ~256+ tokens already
+      exceeds 1 048 576 bytes. `repository.upsert()` then raises
+      `grpc._channel._InactiveRpcError: INVALID_ARGUMENT ("Total size of all vectors (N) must
+      be less than 1048576")`, failing the **whole** batch → the note never indexes and
+      brain-watcher loops on it (5 retries, then the reconcile re-tries forever). Seen on a
+      large vault note (chunk #5 ≈ 1.94 MB). Fix options, cheapest first: (a) **graceful** —
+      upsert points individually / in sub-batches and skip-with-warning on an oversized point
+      instead of 500-ing the whole ingest (smallest, most robust; keeps the rest of the note
+      indexed); (b) **cap** the ColBERT token count / max chunk size so a single point stays
+      < 1 MiB; (c) raise Qdrant's gRPC max message size (server `service.*` + client
+      `grpc_options`) — only lifts the ceiling, doesn't bound it. Repro: ingest any note with a
+      dense ≥256-token chunk. Ref: `service/routes.py:338` → `service/repository.py:118`.
+      *Effort: Low (a) → Medium (b).*
       `QdrantRepository.aggregate_notes()` scrollt die gesamte Collection und aggregiert
       in Python — O(N) pro Aufruf. Bei heutiger Vault-Größe unkritisch; ab einigen
       zehntausend Chunks auf die Qdrant-Facet-API umstellen oder eine kleine
