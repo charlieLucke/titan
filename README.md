@@ -163,6 +163,7 @@ In deployment it runs as a systemd user service (`titan-service`); see `deploy/`
 |---|---|
 | `GET /health` | Service status: BGE-M3 loaded, Qdrant reachable, VRAM usage. |
 | `POST /search` | Hybrid search: query decompose → BGE-M3 → RRF → semantic cache. |
+| `POST /ask` | Full RAG: retrieval (as `/search`) → Phi-4 generates a grounded answer. |
 | `POST /ingest/file` | Index a Markdown file (upsert-before-delete via `run_id`). |
 | `GET /domains` | All domains in the index with chunk counts. |
 | `GET /notes` | All indexed notes grouped by source path, with domain + chunk count. |

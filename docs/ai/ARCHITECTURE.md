@@ -27,7 +27,7 @@ src/titan/
 │                        # Late Chunking, BGE-M3 embed, make_point, Qdrant upsert
 ├── search.py            # Query decompose (Phi-4), BGE-M3, hybrid search (RRF),
 │                        # Epic-5B semantic cache; search() injectable for the service
-├── generate.py          # Phi-4 answer generation (reads chunks from stdin)
+├── generate.py          # Phi-4 answer generation (CLI/stdin + the /ask endpoint)
 ├── evaluate.py          # LLM-as-judge (RAG triad: CR / GR / AR)
 ├── service/
 │   ├── __init__.py
@@ -35,7 +35,7 @@ src/titan/
 │   ├── state.py         # ServiceState singleton (model, client, gpu_lock, domain_counts)
 │   ├── app.py           # FastAPI app + lifespan (load BGE-M3, ColBERT dim check)
 │   ├── schemas.py       # Pydantic request/response types
-│   └── routes.py        # All endpoints: /health /search /ingest/file /domains
+│   └── routes.py        # All endpoints: /health /search /ask /ingest/file /domains
 │                        #                /notes /find_related DELETE /chunks
 ├── eval/
 │   ├── ab_eval.py       # A/B evaluation over eval cases
@@ -118,6 +118,17 @@ query → decompose_query(Phi-4) → sub_queries[]
       → rrf_fusion() → top_k chunks
       → SearchResponse
 ```
+
+### Ask (POST /ask) — RAG: retrieval + generation
+```
+query → search() [identical retrieval to POST /search, under the GPU work-lock]
+      → long_context_reorder(chunks) [best first, 2nd-best last — "lost in the middle"]
+      → build_prompt(query, chunks) [strict, source-grounded system prompt]
+      → call_ollama(Phi-4, stream=False, keep_alive=0)  [outside the lock]
+      → AskResponse {answer, chunks (as sources), model, latency_ms}
+```
+Generation runs *outside* the work-lock (it uses Ollama's GPU, not BGE-M3), so a slow
+answer doesn't block other searches/ingests. Ollama unreachable → 502.
 
 ### Full CLI pipeline
 ```

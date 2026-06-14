@@ -41,7 +41,7 @@ src/titan/
 │   ├── state.py        # ServiceState-Singleton
 │   ├── app.py          # FastAPI-App + Lifespan (BGE-M3-Singleton, GPU-Lock)
 │   ├── schemas.py      # Pydantic Request/Response-Schemas
-│   └── routes.py       # HTTP-Endpunkte (health, search, ingest, domains, …)
+│   └── routes.py       # HTTP-Endpunkte (health, search, ask, ingest, domains, …)
 ├── eval/
 │   ├── ab_eval.py   # A/B-Eval-Tool (vergleicht zwei Läufe)
 │   └── fixtures/
