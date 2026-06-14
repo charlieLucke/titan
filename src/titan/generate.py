@@ -223,6 +223,50 @@ def call_ollama_streaming(prompt: str, model: str) -> str:
 
 
 # ════════════════════════════════════════════════════════════════════════════
+# Programmatische API (für den /ask-Service-Endpunkt)
+# ════════════════════════════════════════════════════════════════════════════
+
+
+def call_ollama(prompt: str, model: str, timeout: int = OLLAMA_TIMEOUT) -> str:
+    """Nicht-streamender Ollama-Aufruf für programmatische Caller (z.B. /ask).
+
+    Anders als ``call_ollama_streaming`` (CLI: druckt Token, ``sys.exit`` bei
+    Fehler) gibt diese Funktion die volle Antwort zurück und lässt
+    ``requests``-Exceptions durch, damit der Caller sie auf einen HTTP-Fehler
+    abbilden kann. ``keep_alive=0`` entlädt Phi-4 nach dem Call wieder (VRAM).
+    """
+    url = f"{OLLAMA_URL}/api/generate"
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False,
+        "keep_alive": 0,
+        "options": {"temperature": 0.1, "num_predict": 1024},
+    }
+    resp = requests.post(url, json=payload, timeout=timeout)
+    resp.raise_for_status()
+    data: dict[str, Any] = resp.json()
+    return str(data.get("response", "")).strip()
+
+
+def generate_answer(
+    query: str,
+    chunks: list[dict[str, Any]],
+    model: str | None = None,
+    reorder: bool = True,
+) -> str:
+    """Volle RAG-Generierung: Chunks umordnen → Prompt bauen → Phi-4 (nicht streamend).
+
+    ``chunks`` brauchen mindestens einen ``text``-Key (``header``/``source``
+    optional, verbessern nur die Quellenangabe im Prompt). Wirft bei
+    Ollama-Fehler (vom Caller auf HTTP gemappt).
+    """
+    ordered = long_context_reorder(chunks) if reorder else chunks
+    prompt = build_prompt(query, ordered)
+    return call_ollama(prompt, model=model or OLLAMA_MODEL)
+
+
+# ════════════════════════════════════════════════════════════════════════════
 # Eingabe: JSON von stdin oder --chunks-file
 # ════════════════════════════════════════════════════════════════════════════
 

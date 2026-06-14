@@ -464,6 +464,64 @@ def test_search_domain_isolation(app_client: TestClient, tmp_vault: Path) -> Non
         assert chunk["domain"] == "domain_b", f"Domain-Leck: {chunk}"
 
 
+# ─── Ask Tests (RAG + Phi-4) ──────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+def test_ask_returns_answer_and_sources(app_client: TestClient, tmp_vault: Path) -> None:
+    """POST /ask: Retrieval-Treffer + von Phi-4 (gemockt) formulierte Antwort."""
+    note = tmp_vault / "ask_test.md"
+    note.write_text(
+        "---\ndomain: asktest\n---\n"
+        "# Ask-Test\nUnique-Ask-Phrase-OMEGA0099. RAG kombiniert Retrieval und Generation."
+    )
+
+    with patch("titan.service.routes.VAULT_ROOT", tmp_vault):
+        ingest_resp = app_client.post("/ingest/file", json={"file_path": str(note)})
+    assert ingest_resp.status_code == 200
+
+    # Ollama/Phi-4 gemockt — kein laufendes Ollama nötig.
+    with (
+        patch("titan.search.decompose_query", return_value=["OMEGA0099"]),
+        patch(
+            "titan.generate.call_ollama", return_value="RAG kombiniert Retrieval und Generation."
+        ),
+    ):
+        resp = app_client.post(
+            "/ask",
+            json={"query": "Was ist RAG?", "domain": "asktest", "top_k": 5, "use_decompose": False},
+        )
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["answer"] == "RAG kombiniert Retrieval und Generation."
+    assert "chunks" in data
+    assert data["model"]  # verwendeter Ollama-Modellname ist gesetzt
+    assert data["latency_ms"] >= 0
+
+
+@pytest.mark.integration
+def test_ask_no_hits_skips_generation(app_client: TestClient) -> None:
+    """POST /ask ohne Treffer → Standard-'keine Antwort'-Satz, ohne Ollama-Call."""
+    with (
+        patch("titan.search.decompose_query", return_value=["nichts"]),
+        patch("titan.generate.call_ollama") as call_ollama_mock,
+    ):
+        resp = app_client.post(
+            "/ask",
+            json={
+                "query": "gibt es nicht",
+                "domain": "zzz_keine_domain_xyz",
+                "top_k": 5,
+                "use_decompose": False,
+            },
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert "keine Antwort" in resp.json()["answer"]
+    call_ollama_mock.assert_not_called()
+
+
 # ─── Domains nach Ingest ─────────────────────────────────────────────────────
 
 

@@ -50,6 +50,27 @@ class SearchResponse(BaseModel):
     latency_ms: int
 
 
+# ─── Ask (RAG: Retrieval + Phi-4-Antwort) ─────────────────────────────────────
+
+
+class AskRequest(BaseModel):
+    query: str = Field(..., min_length=1, max_length=10_000)
+    domain: str | None = None
+    top_k: int = Field(default=5, ge=1, le=20)
+    use_decompose: bool = True
+    use_cache: bool = True
+
+
+class AskResponse(BaseModel):
+    query: str
+    answer: str
+    model: str  # das verwendete Ollama-Modell (z.B. phi4:latest)
+    chunks: list[Chunk]  # die als Kontext genutzten Retrieval-Treffer (für Quellen)
+    sub_queries: list[str]
+    cache_hit: bool
+    latency_ms: int
+
+
 # ─── Ingest ──────────────────────────────────────────────────────────────────
 
 

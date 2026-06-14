@@ -27,12 +27,15 @@ import uuid
 from pathlib import Path
 from typing import Literal
 
+import requests
 import torch
 from fastapi import APIRouter, HTTPException
 
 from titan.config import settings
 from titan.service.repository import NoteAggregate, QdrantRepository
 from titan.service.schemas import (
+    AskRequest,
+    AskResponse,
     Chunk,
     DeleteChunksResponse,
     DomainsResponse,
@@ -218,6 +221,84 @@ def search_endpoint(req: SearchRequest) -> SearchResponse:
         sub_queries=result.get("sub_queries", []),
         cache_hit=result.get("cache_hit", False),
         latency_ms=latency_ms,
+    )
+
+
+# ─── Ask (RAG: Retrieval + Phi-4-Antwort) ─────────────────────────────────────
+
+
+@router.post("/ask", response_model=AskResponse)
+def ask_endpoint(req: AskRequest) -> AskResponse:
+    """RAG-Antwort: Retrieval (BGE-M3 + RRF) → Phi-4 formuliert die Antwort.
+
+    Das Retrieval läuft unter work_lock (GPU-serialisiert wie /search). Die
+    anschließende Phi-4-Generierung läuft bewusst OHNE Lock — sie nutzt nicht
+    BGE-M3, und Ollama verwaltet seine GPU selbst; so blockiert der (langsame)
+    Generate-Schritt nicht den ganzen Service. 502, wenn Ollama nicht erreichbar.
+    """
+    if state.bge_model is None or state.qdrant_client is None:
+        raise HTTPException(503, "Service nicht bereit (BGE-M3 oder Qdrant nicht geladen)")
+
+    from titan.search import search  # lokaler Import vermeidet Circular-Import-Risiko
+
+    t0 = time.perf_counter()
+    with state.work_lock:
+        result = search(
+            query=req.query,
+            domain=req.domain,
+            top_k=req.top_k,
+            use_decompose=req.use_decompose,
+            use_cache=req.use_cache,
+            model=state.bge_model,
+            qdrant_client=state.qdrant_client,
+        )
+        state.search_count += 1
+        if result.get("cache_hit", False):
+            state.cache_hit_count += 1
+
+    raw_chunks = result["chunks"]
+    chunks = [
+        Chunk(
+            text=c.get("text", ""),
+            source_path=c.get("source_path", ""),
+            domain=c.get("domain", ""),
+            chunk_offset=c.get("chunk_offset", 0),
+            score=float(c.get("score", 0.0)),
+            metadata={
+                k: v
+                for k, v in c.items()
+                if k not in {"text", "source_path", "domain", "chunk_offset", "score"}
+            },
+        )
+        for c in raw_chunks
+    ]
+
+    if not raw_chunks:
+        answer = "Die bereitgestellten Informationen enthalten keine Antwort auf diese Frage."
+    else:
+        from titan.generate import generate_answer  # lazy: hält requests/Ollama aus dem Importpfad
+
+        prompt_chunks = [
+            {
+                "text": c.get("text", ""),
+                "source": Path(c.get("source_path", "")).name,
+                "header": str(c.get("header", "")),
+            }
+            for c in raw_chunks
+        ]
+        try:
+            answer = generate_answer(req.query, prompt_chunks)
+        except requests.RequestException as exc:
+            raise HTTPException(502, f"Ollama/Phi-4 nicht erreichbar: {exc}") from exc
+
+    return AskResponse(
+        query=req.query,
+        answer=answer,
+        model=settings.ollama_model,
+        chunks=chunks,
+        sub_queries=result.get("sub_queries", []),
+        cache_hit=result.get("cache_hit", False),
+        latency_ms=int((time.perf_counter() - t0) * 1000),
     )
 
 
