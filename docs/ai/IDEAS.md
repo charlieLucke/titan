@@ -10,6 +10,20 @@
 
 ## Pending
 
+- [ ] **2026-06-15: docs/ai NICHT in die Haupt-Collection `mein_wissen` ingesten (Entscheidung/Guard).**
+      Verlockend, aber es verwaessert den Wissens-Index: docs/ai ist dichtes
+      Engineering-Geruest (CURRENT_TASK, HANDOFF, IDEAS-TODOs, plans mit
+      Implementierer-Prompts, CONTRACTS) — als Chunks taeuchten Plan-/Meta-Fragmente bei
+      Wissensfragen als „Treffer" auf (dasselbe Problem wie die obsidian-IDEA „nur die
+      Summary indexieren"), es hat kein `domain:`-Frontmatter, aendert sich staendig
+      (Cache-Invalidierung, Staleness) und liegt ausserhalb von `VAULT_ROOT`. Fuer
+      „Projektstand/was-als-naechstes" ist ohnehin ein **direkter Datei-Read** das
+      richtige Pattern (authoritativ, aktuell), nicht semantisches top-k — siehe
+      workspace-mcp-IDEA `project_status` und die Chatbot-IDEA in brain-dashboard. Falls
+      docs/ai je *semantisch* durchsuchbar sein soll: **eigene Collection/Namespace**
+      (vgl. die Multi-Collection-IDEA weiter unten), niemals `mein_wissen`.
+      *Effort: 0 (bewusst nichts tun) — bzw. Medium, falls separate Collection gewollt.*
+
 - [ ] **2026-06-14: Ingest 500 when a chunk's multi-vector exceeds Qdrant's 1 MiB per-point gRPC limit.**
       BGE-M3 ColBERT emits one 1024-d vector per token, so a chunk of ~256+ tokens already
       exceeds 1 048 576 bytes. `repository.upsert()` then raises
