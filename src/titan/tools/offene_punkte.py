@@ -205,7 +205,19 @@ def _sortiert(treffer: list[dict[str, Any]]) -> list[dict[str, Any]]:
     # Innerhalb einer Stufe das aelteste zuerst: Was am laengsten liegt, ist das,
     # was am ehesten vergessen wurde. Ohne Datum ans Ende - das ist kein alter
     # Punkt, sondern ein Konventionsbruch.
-    return sorted(treffer, key=lambda e: (rang.get(e["marker"], 9), e["seit"] or "9999-99-99"))
+    #
+    # Notiz und Titel als Stichentscheid, damit der Bericht bei gleichem Datum
+    # nicht von der Dateireihenfolge abhaengt. Ohne das hat das Einsortieren in
+    # Unterordner die Reihenfolge umgeworfen, ohne dass sich ein Punkt aenderte.
+    return sorted(
+        treffer,
+        key=lambda e: (
+            rang.get(e["marker"], 9),
+            e["seit"] or "9999-99-99",
+            str(e.get("notiz", "")),
+            str(e.get("titel", "")),
+        ),
+    )
 
 
 def _gruppen(treffer: list[dict[str, Any]], ideen: bool) -> list[tuple[str, list[dict[str, Any]]]]:
