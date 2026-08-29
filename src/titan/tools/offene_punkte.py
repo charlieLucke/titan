@@ -204,6 +204,14 @@ def _als_text(treffer: list[dict[str, Any]], ideen: bool, erledigt: int) -> list
 
 def _als_markdown(treffer: list[dict[str, Any]], ideen: bool, erledigt: int) -> list[str]:
     titel = "Ideen" if ideen else "Offene Punkte"
+    # Der Befehl im Kopf muss der sein, der genau diese Datei erzeugt - sonst
+    # schreibt ihn jemand ueber den falschen Bericht.
+    befehl = (
+        "uv run python -m titan.tools.offene_punkte"
+        + (" --ideen" if ideen else "")
+        + " --markdown > /mnt/f/vault/"
+        + ("ideen.md" if ideen else "offene-punkte.md")
+    )
     zeilen = [
         "---",
         "indexed: false",
@@ -218,7 +226,7 @@ def _als_markdown(treffer: list[dict[str, Any]], ideen: bool, erledigt: int) -> 
         "> Wahrheit wird.",
         "",
         "```bash",
-        "uv run python -m titan.tools.offene_punkte --markdown > /mnt/f/vault/offene-punkte.md",
+        befehl,
         "```",
         "",
         f"{len(treffer)} offen, {erledigt} erledigt.",
