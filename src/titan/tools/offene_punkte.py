@@ -97,7 +97,16 @@ def _abschnitt(zeilen: list[str], ueberschrift: str) -> list[dict[str, Any]]:
     """
     punkte: list[dict[str, Any]] = []
     tiefe: int | None = None
+    im_code = False
     for zeile in zeilen:
+        if zeile.lstrip().startswith("```"):
+            # Ein Beispiel im Codeblock ist kein Punkt. ideen-ohne-zuhause zeigt
+            # die Form vor - ohne diese Zeile stand die Vorlage als echte Idee
+            # im Bericht.
+            im_code = not im_code
+            continue
+        if im_code:
+            continue
         kopf = _HEADING.match(zeile)
         if kopf:
             if tiefe is not None and len(kopf.group(1)) <= tiefe:

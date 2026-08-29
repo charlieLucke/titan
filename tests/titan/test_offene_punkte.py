@@ -67,6 +67,19 @@ def test_fehlende_ueberschrift_gibt_nichts() -> None:
     assert _abschnitt(["# Nur ein Titel", "- ein Punkt"], H_OFFEN) == []
 
 
+def test_beispiel_im_codeblock_ist_kein_punkt() -> None:
+    """Regression: die Formvorlage in ideen-ohne-zuhause stand als echte Idee im Bericht."""
+    zeilen = [
+        "## Offene Punkte",
+        "- [ ] **Echt.** (seit 2026-08-29)",
+        "```markdown",
+        "- [ ] **Kurztitel.** Was und warum. (seit 2026-08-29)",
+        "```",
+    ]
+    punkte = _abschnitt(zeilen, H_OFFEN)
+    assert [_zerlege(p)["titel"] for p in punkte] == ["Echt"]
+
+
 # ─── Fortsetzungszeilen ──────────────────────────────────────────────────────
 
 MEHRZEILIG = """\
