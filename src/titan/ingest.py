@@ -77,9 +77,41 @@ LATE_CHUNK_WINDOW_TOKENS: int = settings.late_chunk_window_tokens
 # Trennzeichen zwischen Chunks im Fenstertext
 _WINDOW_SEP = "\n\n[SEP]\n\n"
 
-# Maximalgröße eines Sub-Chunks (~6000 Tokens, sicher unter BGE-M3-Limit)
-MAX_SUPER_CHUNK_CHARS: int = 24_000
-OVERLAP_CHARS: int = 4_000
+# ─── Chunk-Obergrenze: nicht BGE-M3 ist die Schranke, sondern Qdrant ─────────
+#
+# Qdrant lehnt einen Punkt ab, dessen Vektoren zusammen 1 MiB ueberschreiten.
+# Gemessen am 29.08.2026: **eine ColBERT-Zeile je Token, 1024 Bytes je Zeile**,
+# also hart bei 1024 Tokens pro Chunk. Weder float16 noch uint8 als Datatype
+# verschieben das - die Grenze sitzt in der Request-Validierung, nicht im
+# Speicher (beide Varianten gegen ein echtes Qdrant geprueft, beide werden bei
+# exakt derselben Zahl abgelehnt).
+#
+# Die alte Grenze von 24.000 Zeichen war auf BGE-M3s Eingabelimit von 8192
+# Tokens ausgelegt und damit rund achtmal zu gross. Folge: 149 von 392 Chunks
+# des Vaults liessen sich nicht speichern, und weil der Upsert alle Chunks einer
+# Notiz in einem Aufruf schickt, fiel jeweils die **ganze** Notiz aus - sie
+# behielt still ihre alten Chunks, weil delete_stale_runs nie erreicht wurde.
+# Sieben von 37 Notizen waren dadurch veraltet oder gar nicht im Index.
+#
+# 2800 Zeichen zielen auf ~900 Tokens: gemessen liegt dieser Vault bei rund
+# 3,1 bis 3,5 Zeichen je Token. Dichteres Material (Code, Tabellen) tokenisiert
+# knapper - dafuer gibt es die harte Pruefung in make_point, die dann laut
+# scheitert, statt Qdrant einen 500 werfen zu lassen.
+MAX_SUPER_CHUNK_CHARS: int = 2_800
+OVERLAP_CHARS: int = 400
+
+# Harte Obergrenze, gegen die make_point prueft. Unter Qdrants 1024 mit Puffer
+# fuer dense und sparse im selben Punkt.
+MAX_COLBERT_ROWS: int = 1_000
+
+
+class ChunkTooLargeError(ValueError):
+    """Ein Chunk ueberschreitet Qdrants Groessengrenze pro Punkt.
+
+    Eigener Typ, damit der Service ihn von anderen ValueErrors unterscheiden und
+    mit 422 statt 500 antworten kann: Der Watcher wertet 4xx als dauerhaft und
+    hoert auf, es fuenfmal zu versuchen.
+    """
 
 
 # ════════════════════════════════════════════════════════════════════════════
@@ -827,6 +859,19 @@ def make_point(
 
     if chunk.dense is None or chunk.sparse is None or chunk.colbert is None:
         raise ValueError("Chunk ohne Embeddings — late_chunk_embed() zuerst aufrufen.")
+
+    # Qdrant lehnt zu grosse Punkte mit einem gRPC-Fehler ab, der als HTTP 500
+    # beim Watcher ankommt — und ein 500 gilt dem als transient, also versucht er
+    # es fuenfmal und gibt dann auf. Die Notiz bleibt still auf ihrem alten Stand.
+    # Deshalb hier pruefen und mit einer Aussage scheitern, die den Fall nennt.
+    rows = len(chunk.colbert)
+    if rows > MAX_COLBERT_ROWS:
+        raise ChunkTooLargeError(
+            f"Chunk {chunk.chunk_id} von {file_path.name} ergibt {rows} ColBERT-Zeilen, "
+            f"erlaubt sind {MAX_COLBERT_ROWS} (Qdrant-Grenze: 1 MiB pro Punkt). "
+            f"Der Abschnitt unter '{chunk.header}' ist zu lang — aufteilen, oder "
+            f"MAX_SUPER_CHUNK_CHARS (aktuell {MAX_SUPER_CHUNK_CHARS}) senken."
+        )
 
     # int(float(k)): FlagEmbedding gibt Keys manchmal als "1024.0" zurück
     sparse_vec = SparseVector(

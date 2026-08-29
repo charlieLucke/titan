@@ -106,13 +106,13 @@ def test_kuratierungsfelder_werden_sanitisiert(tmp_path: Path) -> None:
 class _FakeChunk:
     """Minimal, damit make_point ohne echte Embeddings testbar bleibt."""
 
-    def __init__(self) -> None:
+    def __init__(self, colbert_rows: int = 1) -> None:
         self.text = "Text"
         self.chunk_id = 0
         self.header = "# Titel"
         self.dense = [0.1, 0.2]
         self.sparse = {1: 0.5}
-        self.colbert = [[0.1, 0.2]]
+        self.colbert = [[0.1, 0.2] for _ in range(colbert_rows)]
 
 
 def test_make_point_schreibt_gesetzte_felder_ins_payload() -> None:
@@ -169,3 +169,61 @@ def test_make_point_ohne_curation_bleibt_rueckwaertskompatibel() -> None:
         assert field not in point.payload
     assert point.payload["domain"] == "projekte"
     assert point.payload["content_hash"] == "hash-1"
+
+
+# ─── Qdrant-Groessengrenze ───────────────────────────────────────────────────
+
+
+def test_zu_grosser_chunk_scheitert_mit_eigenem_fehlertyp() -> None:
+    """Der Fall, der 7 von 37 Notizen still veralten liess.
+
+    Vorher lief das in einen gRPC-Fehler, kam als HTTP 500 beim Watcher an, galt
+    dem als transient, und nach fuenf Versuchen blieb die Notiz auf ihrem alten
+    Stand — ohne dass irgendwo stand, welche Notiz warum fehlt.
+    """
+    from titan.ingest import MAX_COLBERT_ROWS, ChunkTooLargeError, make_point
+
+    with pytest.raises(ChunkTooLargeError) as exc:
+        make_point(
+            _FakeChunk(colbert_rows=MAX_COLBERT_ROWS + 1),  # type: ignore[arg-type]
+            Path("/mnt/f/vault/notes/riesig.md"),
+            "betrieb",
+            "run-1",
+            "hash-1",
+        )
+
+    nachricht = str(exc.value)
+    assert "riesig.md" in nachricht
+    assert str(MAX_COLBERT_ROWS + 1) in nachricht
+    assert "MAX_SUPER_CHUNK_CHARS" in nachricht  # sagt, an welcher Schraube man dreht
+
+
+def test_chunk_genau_an_der_grenze_geht_durch() -> None:
+    from titan.ingest import MAX_COLBERT_ROWS, make_point
+
+    point = make_point(
+        _FakeChunk(colbert_rows=MAX_COLBERT_ROWS),  # type: ignore[arg-type]
+        Path("/mnt/f/vault/notes/gerade-noch.md"),
+        "betrieb",
+        "run-1",
+        "hash-1",
+    )
+    assert point.payload["domain"] == "betrieb"
+
+
+def test_grenze_liegt_unter_qdrants_hartem_limit() -> None:
+    """Gemessen: eine ColBERT-Zeile je Token, Qdrant bricht bei 1024 ab."""
+    from titan.ingest import MAX_COLBERT_ROWS
+
+    assert MAX_COLBERT_ROWS < 1024
+
+
+def test_chunk_obergrenze_passt_zur_zeilengrenze() -> None:
+    """2800 Zeichen bei gemessenen ~3,1 Zeichen/Token bleiben unter 1000 Zeilen."""
+    from titan.ingest import MAX_COLBERT_ROWS, MAX_SUPER_CHUNK_CHARS, OVERLAP_CHARS
+
+    knappstes_verhaeltnis = 3.1
+    assert MAX_SUPER_CHUNK_CHARS / knappstes_verhaeltnis < MAX_COLBERT_ROWS
+    # Ueberlappung muss kleiner als der Chunk sein, sonst kommt das Splitten
+    # nicht voran.
+    assert OVERLAP_CHARS < MAX_SUPER_CHUNK_CHARS

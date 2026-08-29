@@ -75,6 +75,21 @@ def _repo() -> QdrantRepository:
     return QdrantRepository(state.qdrant_client, COLLECTION_NAME)
 
 
+def _adjust_domain_count(domain: str | None, delta: int) -> None:
+    """Verschiebt den In-Memory-Zaehler einer Domain und raeumt leere weg.
+
+    Eine Domain, die auf 0 faellt, wird entfernt statt mit 0 gelistet zu werden:
+    /domains soll die Domains nennen, die es gibt, nicht die, die es mal gab.
+    """
+    if not domain:
+        return
+    neu = state.domain_counts.get(domain, 0) + delta
+    if neu > 0:
+        state.domain_counts[domain] = neu
+    else:
+        state.domain_counts.pop(domain, None)
+
+
 def _to_notes_response(aggregates: list[NoteAggregate]) -> NotesResponse:
     """Mappt Repository-Aggregate auf das API-Schema."""
     notes = [
@@ -377,10 +392,13 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         # indexed:false → alte Chunks löschen, kein Neu-Ingest
         if meta.get("_skip"):
             n_old = repo.count_chunks(source)
+            # Die *indexierte* Domain zählt, nicht die im Frontmatter: bei
+            # indexed:false liest read_markdown() das Frontmatter gar nicht
+            # normalisiert, und die Datei kann inzwischen eine andere Domain
+            # nennen als die, unter der ihre Chunks liegen.
+            domain_val = repo.domain_of(source)
             repo.delete_by_source(source)
-            domain_val: str | None = meta.get("domain")
-            if domain_val and domain_val in state.domain_counts:
-                state.domain_counts[domain_val] = max(0, state.domain_counts[domain_val] - n_old)
+            _adjust_domain_count(domain_val, -n_old)
             return IngestResponse(
                 file_path=source,
                 domain=None,
@@ -394,6 +412,10 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
 
         # Compute content hash once per ingest (before chunking/embedding — same raw bytes).
         content_hash = hashlib.sha256(file_path.read_bytes()).hexdigest()
+
+        # Vor dem Upsert lesen: danach liefert domain_of() die neue Domain, und
+        # ein Domainwechsel liesse sich nicht mehr erkennen.
+        prev_domain = repo.domain_of(source)
 
         # Content-Hash-Skip: identische Bytes wie die indexierte Version → kein
         # Re-Embed. Der Watcher feuert auch bei reinen Metadaten-Events
@@ -412,7 +434,12 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         # A6: Upsert-before-Delete mit run_id
         run_id = str(uuid.uuid4())
 
-        from titan.ingest import CURATION_FIELDS, late_chunk_and_embed, make_point  # lazy imports
+        from titan.ingest import (  # lazy imports
+            CURATION_FIELDS,
+            ChunkTooLargeError,
+            late_chunk_and_embed,
+            make_point,
+        )
 
         new_chunks = late_chunk_and_embed(content, model=state.bge_model)
 
@@ -422,18 +449,35 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         # read_markdown() hat die Felder bereits normalisiert und sanitisiert.
         curation = {field: meta.get(field) for field in CURATION_FIELDS}
 
-        repo.upsert(
-            [
+        try:
+            points = [
                 make_point(c, file_path, domain, run_id, content_hash, curation=curation)
                 for c in new_chunks
             ]
-        )
+        except ChunkTooLargeError as exc:
+            # 422, nicht 500: Das ist ein Eingabefehler (Abschnitt zu lang), kein
+            # Serverfehler. Der Watcher behandelt 4xx als permanent und hoert auf,
+            # es zu wiederholen — vorher kam der Fall als gRPC-500 durch und die
+            # Notiz blieb still auf ihrem alten Stand.
+            log.warning("Ingest abgelehnt: %s", exc)
+            raise HTTPException(422, str(exc)) from exc
+
+        repo.upsert(points)
         repo.delete_stale_runs(source, keep_run_id=run_id)
 
-        # Domain-Counter aktualisieren (A10: Cache-Invalidierung folgt nach diesem Block)
-        state.domain_counts[domain] = (
-            state.domain_counts.get(domain, 0) - n_before + len(new_chunks)
-        )
+        # Domain-Counter aktualisieren (A10: Cache-Invalidierung folgt nach diesem Block).
+        # prev_domain ist vor dem Upsert gelesen — danach wuerde die neue Domain
+        # zurueckkommen. Wechselt eine Note die Domain, muessen die alten Chunks
+        # von der ALTEN Domain abgezogen werden. Vorher wurde n_before immer von
+        # der neuen abgezogen: die alte behielt ihre Zahl fuer immer, die neue
+        # wurde zu stark reduziert. Aufgefallen beim Domain-Umzug des Vaults am
+        # 29.08.2026 — /domains meldete 17 Chunks fuer eine Domain, in der
+        # /domains/{d}/notes keine einzige Note mehr fand.
+        if prev_domain and prev_domain != domain:
+            _adjust_domain_count(prev_domain, -n_before)
+            _adjust_domain_count(domain, len(new_chunks))
+        else:
+            _adjust_domain_count(domain, len(new_chunks) - n_before)
 
         # A10: Cache für diese Domain invalidieren
         from titan.search import invalidate_domain_cache
