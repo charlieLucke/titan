@@ -17,7 +17,9 @@ from titan.tools.offene_punkte import (
     _abschnitt,
     _alter,
     _sortiert,
+    _tage,
     _zerlege,
+    unindiziert,
 )
 
 # ─── _abschnitt ──────────────────────────────────────────────────────────────
@@ -153,3 +155,19 @@ def test_alter_in_tagen() -> None:
 def test_alter_bei_unsinn_ist_none() -> None:
     assert _alter("2026-13-99", date(2026, 8, 29)) is None
     assert _alter(None, date(2026, 8, 29)) is None
+
+
+def test_ein_tag_ist_singular() -> None:
+    assert _tage(1) == "1 Tag"
+    assert _tage(0) == "0 Tage"
+    assert _tage(75) == "75 Tage"
+
+
+# ─── unindiziert ─────────────────────────────────────────────────────────────
+
+
+def test_bericht_und_anweisungen_werden_uebersprungen() -> None:
+    """Ohne das meldet der Bericht seine eigene Ueberschrift als Konventionsbruch."""
+    assert unindiziert("---\nindexed: false\n---\n\n# Bericht\n")
+    assert not unindiziert("---\ndomain: betrieb\n---\n\n# Notiz\n")
+    assert not unindiziert("# Ganz ohne Frontmatter\n")

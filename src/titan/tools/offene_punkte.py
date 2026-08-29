@@ -69,6 +69,7 @@ _SEIT = re.compile(r"\(seit\s+(\d{4}-\d{2}-\d{2})\)")
 # ist Betonung - sonst heisst der Punkt "fremden" statt "Vor der ersten ...".
 _TITEL = re.compile(r"^\*\*(.+?)\*\*")
 _FM_DOMAIN = re.compile(r"^domain:\s*(\S+)\s*$", re.MULTILINE)
+_FM_UNINDIZIERT = re.compile(r"^indexed:\s*false\s*$", re.MULTILINE | re.IGNORECASE)
 
 # Reihenfolge ist die Ausgabereihenfolge.
 STUFEN: tuple[tuple[str, str], ...] = (
@@ -78,14 +79,25 @@ STUFEN: tuple[tuple[str, str], ...] = (
 )
 
 
-def _domain(text: str) -> str:
+def _frontmatter(text: str) -> str:
     if not text.startswith("---"):
-        return "?"
+        return ""
     teile = text.split("---", 2)
-    if len(teile) < 2:
-        return "?"
-    m = _FM_DOMAIN.search(teile[1])
+    return teile[1] if len(teile) > 1 else ""
+
+
+def _domain(text: str) -> str:
+    m = _FM_DOMAIN.search(_frontmatter(text))
     return m.group(1) if m else "?"
+
+
+def unindiziert(text: str) -> bool:
+    """`indexed: false` heisst: keine Notiz, sondern Anweisung oder Bericht.
+
+    Sonst meldet der Bericht seine eigene Ueberschrift als Konventionsbruch -
+    und CLAUDE.md, wo die Konvention definiert wird, gleich mit.
+    """
+    return bool(_FM_UNINDIZIERT.search(_frontmatter(text)))
 
 
 def _abschnitt(zeilen: list[str], ueberschrift: str) -> list[dict[str, Any]]:
@@ -155,6 +167,8 @@ def sammle(wurzel: Path, ueberschrift: str) -> tuple[list[dict[str, Any]], list[
         if ".git" in pfad.parts:
             continue
         text = pfad.read_text(encoding="utf-8", errors="replace")
+        if unindiziert(text):
+            continue
         zeilen = text.splitlines()
         domain = _domain(text)
         for roh in _abschnitt(zeilen, ueberschrift):
@@ -164,10 +178,15 @@ def sammle(wurzel: Path, ueberschrift: str) -> tuple[list[dict[str, Any]], list[
             treffer.append(eintrag)
         for zeile in zeilen:
             kopf = _HEADING.match(zeile)
-            if not kopf:
+            # Nur Abschnitte (##+), nicht der Titel der Notiz. Und nur kurze
+            # Ueberschriften: "Wie ich alle Ideen auf einmal sehe" ist eine
+            # Anleitung, keine falsch benannte Liste.
+            if not kopf or len(kopf.group(1)) < 2:
                 continue
             titel = kopf.group(2).strip()
-            if titel not in (H_OFFEN, H_IDEEN) and _FASTTREFFER.search(titel):
+            if titel in (H_OFFEN, H_IDEEN) or len(titel.split()) > 4:
+                continue
+            if _FASTTREFFER.search(titel):
                 hinweise.append(f"{pfad.stem}: {titel}")
     return treffer, hinweise
 
@@ -197,6 +216,10 @@ def _gruppen(treffer: list[dict[str, Any]], ideen: bool) -> list[tuple[str, list
         for zeichen, name in STUFEN
         if any(e["marker"] == zeichen for e in treffer)
     ]
+
+
+def _tage(n: int | None) -> str:
+    return "1 Tag" if n == 1 else f"{n} Tage"
 
 
 def _als_text(treffer: list[dict[str, Any]], ideen: bool, erledigt: int) -> list[str]:
@@ -238,14 +261,14 @@ def _als_markdown(treffer: list[dict[str, Any]], ideen: bool, erledigt: int) -> 
         befehl,
         "```",
         "",
-        f"{len(treffer)} offen, {erledigt} erledigt.",
+        f"{len(treffer)} {'Ideen' if ideen else 'offen'}, {erledigt} erledigt.",
         "",
     ]
     for name, gruppe in _gruppen(treffer, ideen):
         zeilen += [f"## {name.title()} ({len(gruppe)})", ""]
         for e in gruppe:
             alt = (
-                f" · seit {e['seit']} ({e['alter_tage']} Tage)"
+                f" · seit {e['seit']} ({_tage(e['alter_tage'])})"
                 if e["seit"]
                 else " · **ohne Datum**"
             )
