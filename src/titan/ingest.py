@@ -201,6 +201,31 @@ def _compute_section_id(source: str, header: str) -> str:
 
 _HEADER_RE = re.compile(r"^(#{1,2}\s+.+)", re.MULTILINE)
 
+# Obsidian-Wikilinks: [[note]] oder [[note|Anzeigetext]]. Der Vault pflegt sie
+# von Hand und vollstaendig - das ist die beste Verwandtschaftsinformation, die
+# es gibt, und sie stand bis 29.08.2026 nicht im Index.
+_WIKILINK_RE = re.compile(r"\[\[([^\]|#]+?)(?:[#|][^\]]*)?\]\]")
+
+# Code-Bloecke und Inline-Code muessen raus, bevor gesucht wird. Sonst wird aus
+# einer Zeile ueber noVNC ("aus {{.Names}} wird [[.Names]]") ein Link auf eine
+# Notiz, die es nicht gibt - genau dieser Fall steht im Vault.
+_CODE_RE = re.compile(r"```.*?```|`[^`\n]*`", re.DOTALL)
+
+
+def extract_wikilinks(markdown: str) -> list[str]:
+    """Sammelt die Ziele aller Wikilinks eines Dokuments.
+
+    Args:
+        markdown: Markdown-Volltext ohne Frontmatter.
+
+    Returns:
+        Alphabetisch sortierte, doppelfreie Liste der Zielnamen (ohne Endung,
+        ohne Anker, ohne Anzeigetext).
+    """
+    ohne_code = _CODE_RE.sub(" ", markdown)
+    ziele = {m.group(1).strip() for m in _WIKILINK_RE.finditer(ohne_code)}
+    return sorted(z for z in ziele if z)
+
 
 def chunk_markdown(markdown: str, source_path: Path) -> list[Chunk]:
     """Zerschneidet Markdown-Text an Headern (h1–h2) in semantische Chunks.
@@ -828,6 +853,7 @@ def make_point(
     content_hash: str,
     *,
     curation: dict[str, str | None] | None = None,
+    links: list[str] | None = None,
 ) -> Any:
     """Erstellt ein Qdrant-PointStruct aus einem embedded Chunk.
 
@@ -895,6 +921,12 @@ def make_point(
         value = (curation or {}).get(field)
         if value:
             payload[field] = value
+
+    # Die ausgehenden Wikilinks der ganzen Note, auf jedem ihrer Chunks - wie
+    # domain und content_hash auch. Kostet Platz, macht aber jede Graph-Frage
+    # ohne Zweitspeicher beantwortbar.
+    if links:
+        payload["links"] = links
 
     return PointStruct(
         id=stable_uuid(source_str, chunk.chunk_id),

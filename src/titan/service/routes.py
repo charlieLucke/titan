@@ -44,6 +44,7 @@ from titan.service.schemas import (
     HealthResponse,
     IngestRequest,
     IngestResponse,
+    LinkedNote,
     NoteInfo,
     NotesResponse,
     SearchRequest,
@@ -101,6 +102,7 @@ def _to_notes_response(aggregates: list[NoteAggregate]) -> NotesResponse:
             updated=a.updated,
             geprueft=a.geprueft,
             quelle=a.quelle,
+            links=a.links,
         )
         for a in aggregates
     ]
@@ -437,11 +439,13 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         from titan.ingest import (  # lazy imports
             CURATION_FIELDS,
             ChunkTooLargeError,
+            extract_wikilinks,
             late_chunk_and_embed,
             make_point,
         )
 
         new_chunks = late_chunk_and_embed(content, model=state.bge_model)
+        links = extract_wikilinks(content)
 
         # Count BEFORE upsert so chunks_deleted reflects the true size of the previous version.
         n_before = repo.count_chunks(source)
@@ -451,7 +455,9 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
 
         try:
             points = [
-                make_point(c, file_path, domain, run_id, content_hash, curation=curation)
+                make_point(
+                    c, file_path, domain, run_id, content_hash, curation=curation, links=links
+                )
                 for c in new_chunks
             ]
         except ChunkTooLargeError as exc:
@@ -528,9 +534,15 @@ def find_related_endpoint(req: FindRelatedRequest) -> FindRelatedResponse:
         for r in hits
     ]
 
+    linked = [
+        LinkedNote(source_path=sp, domain=dom, direction=richtung)  # type: ignore[arg-type]
+        for sp, dom, richtung in repo.link_neighbours(str(src_path))
+    ]
+
     return FindRelatedResponse(
         source_path=str(src_path),
         related=related,
+        linked=linked,
         latency_ms=int((time.perf_counter() - t0) * 1000),
     )
 

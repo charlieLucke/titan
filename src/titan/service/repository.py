@@ -13,7 +13,7 @@ einfach state.qdrant_client injizieren und COLLECTION_NAME patchen können.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -31,6 +31,8 @@ class NoteAggregate:
     updated: str | None = None
     geprueft: str | None = None
     quelle: str | None = None
+    # Ausgehende Wikilinks der Note (titan.ingest.extract_wikilinks).
+    links: list[str] = field(default_factory=list)
 
 
 class QdrantRepository:
@@ -155,6 +157,39 @@ class QdrantRepository:
         )
         return list(results.points)
 
+    def link_neighbours(self, source_path: str) -> list[tuple[str, str, str]]:
+        """Notizen, die per Wikilink mit dieser verbunden sind.
+
+        Returns:
+            Tripel (source_path, domain, richtung) mit richtung in
+            outgoing / incoming / both.
+        """
+        from pathlib import Path
+
+        eigener_name = Path(source_path).stem
+        aggregates = self.aggregate_notes()
+
+        eigene_links: set[str] = set()
+        for a in aggregates:
+            if a.source_path == source_path:
+                eigene_links = set(a.links)
+                break
+
+        nachbarn: list[tuple[str, str, str]] = []
+        for a in aggregates:
+            if a.source_path == source_path:
+                continue
+            name = Path(a.source_path).stem
+            raus = name in eigene_links
+            rein = eigener_name in a.links
+            if raus and rein:
+                nachbarn.append((a.source_path, a.domain, "both"))
+            elif raus:
+                nachbarn.append((a.source_path, a.domain, "outgoing"))
+            elif rein:
+                nachbarn.append((a.source_path, a.domain, "incoming"))
+        return sorted(nachbarn)
+
     def aggregate_notes(self, domain: str | None = None) -> list[NoteAggregate]:
         """Scrollt die Collection und aggregiert pro source_path.
 
@@ -178,6 +213,7 @@ class QdrantRepository:
         # stammen aus demselben Ingest-Lauf und tragen dieselben Werte — der
         # erste gesehene Chunk entscheidet, wie schon bei domain und hash.
         curation: dict[str, dict[str, str | None]] = {}
+        links: dict[str, list[str]] = {}
         offset = None
         while True:
             records, offset = self._client.scroll(
@@ -185,7 +221,7 @@ class QdrantRepository:
                 scroll_filter=scroll_filter,
                 limit=256,
                 offset=offset,
-                with_payload=["source_path", "domain", "content_hash", *CURATION_FIELDS],
+                with_payload=["source_path", "domain", "content_hash", "links", *CURATION_FIELDS],
                 with_vectors=False,
             )
             for record in records:
@@ -196,9 +232,8 @@ class QdrantRepository:
                 counts[source_path] = counts.get(source_path, 0) + 1
                 domains.setdefault(source_path, str(payload.get("domain", "")))
                 hashes.setdefault(source_path, payload.get("content_hash"))
-                curation.setdefault(
-                    source_path, {field: payload.get(field) for field in CURATION_FIELDS}
-                )
+                curation.setdefault(source_path, {f: payload.get(f) for f in CURATION_FIELDS})
+                links.setdefault(source_path, list(payload.get("links") or []))
             if offset is None:
                 break
 
@@ -211,6 +246,7 @@ class QdrantRepository:
                 updated=curation[sp].get("updated"),
                 geprueft=curation[sp].get("geprueft"),
                 quelle=curation[sp].get("quelle"),
+                links=links.get(sp, []),
             )
             for sp in sorted(counts)
         ]

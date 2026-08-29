@@ -108,9 +108,21 @@ class FindRelatedRequest(BaseModel):
     exclude_self: bool = True
 
 
+class LinkedNote(BaseModel):
+    """A note connected by a hand-written wikilink, not by embedding distance."""
+
+    source_path: str
+    domain: str
+    direction: Literal["outgoing", "incoming", "both"]
+
+
 class FindRelatedResponse(BaseModel):
     source_path: str
     related: list[Chunk]
+    # Wikilink neighbours. Deliberately a separate list, not mixed into the
+    # ranking: a hand-written link is a different kind of evidence than
+    # embedding distance, and blending them would hide which one fired.
+    linked: list[LinkedNote] = Field(default_factory=list)
     latency_ms: int
 
 
@@ -136,6 +148,7 @@ class NoteInfo(BaseModel):
     geprueft: str | None = None  # ISO date its claims were last checked against reality;
     # null means never — that is the answer worth asking for
     quelle: str | None = None  # gemessen | recherchiert | ueberlegt | agent-entwurf
+    links: list[str] = Field(default_factory=list)  # outgoing wikilink targets
 
 
 class NotesResponse(BaseModel):
