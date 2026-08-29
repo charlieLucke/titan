@@ -25,6 +25,12 @@ class NoteAggregate:
     domain: str
     chunk_count: int
     content_hash: str | None
+    # Kuratierungsfelder aus dem Frontmatter (titan.ingest.CURATION_FIELDS).
+    # None heisst "nicht gesetzt" — bei 'geprueft' also "nie geprüft", und das
+    # ist die eigentlich interessante Auskunft.
+    updated: str | None = None
+    geprueft: str | None = None
+    quelle: str | None = None
 
 
 class QdrantRepository:
@@ -163,9 +169,15 @@ class QdrantRepository:
                 must=[FieldCondition(key="domain", match=MatchValue(value=domain))]
             )
 
+        from titan.ingest import CURATION_FIELDS
+
         counts: dict[str, int] = {}
         domains: dict[str, str] = {}
         hashes: dict[str, str | None] = {}
+        # Pro Note ein Dict mit den Kuratierungsfeldern. Alle Chunks einer Datei
+        # stammen aus demselben Ingest-Lauf und tragen dieselben Werte — der
+        # erste gesehene Chunk entscheidet, wie schon bei domain und hash.
+        curation: dict[str, dict[str, str | None]] = {}
         offset = None
         while True:
             records, offset = self._client.scroll(
@@ -173,7 +185,7 @@ class QdrantRepository:
                 scroll_filter=scroll_filter,
                 limit=256,
                 offset=offset,
-                with_payload=["source_path", "domain", "content_hash"],
+                with_payload=["source_path", "domain", "content_hash", *CURATION_FIELDS],
                 with_vectors=False,
             )
             for record in records:
@@ -184,6 +196,9 @@ class QdrantRepository:
                 counts[source_path] = counts.get(source_path, 0) + 1
                 domains.setdefault(source_path, str(payload.get("domain", "")))
                 hashes.setdefault(source_path, payload.get("content_hash"))
+                curation.setdefault(
+                    source_path, {field: payload.get(field) for field in CURATION_FIELDS}
+                )
             if offset is None:
                 break
 
@@ -193,6 +208,9 @@ class QdrantRepository:
                 domain=domains[sp],
                 chunk_count=counts[sp],
                 content_hash=hashes[sp],
+                updated=curation[sp].get("updated"),
+                geprueft=curation[sp].get("geprueft"),
+                quelle=curation[sp].get("quelle"),
             )
             for sp in sorted(counts)
         ]

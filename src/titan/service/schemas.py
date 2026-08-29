@@ -130,6 +130,12 @@ class NoteInfo(BaseModel):
     domain: str
     chunk_count: int
     content_hash: str | None = None  # sha256 of the note's raw bytes; null for legacy/PDF chunks
+    # Curation fields from the note's frontmatter. All optional and additive —
+    # consumers written before these existed keep working unchanged.
+    updated: str | None = None  # ISO date the note was last edited
+    geprueft: str | None = None  # ISO date its claims were last checked against reality;
+    # null means never — that is the answer worth asking for
+    quelle: str | None = None  # gemessen | recherchiert | ueberlegt | agent-entwurf
 
 
 class NotesResponse(BaseModel):

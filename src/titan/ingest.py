@@ -60,6 +60,16 @@ EMBED_BATCH_SIZE: int = settings.embed_batch_size
 # Path-Traversal-Schutz: Ingest nur aus diesem Verzeichnis erlaubt
 INGEST_BASE_DIR: Path = settings.ingest_base_dir.resolve()
 
+# Optionale Frontmatter-Felder, die den Kuratierungszustand einer Note
+# beschreiben. Sie wandern in die Qdrant-Payload, damit sich danach filtern
+# laesst — vor allem "was behauptet der Vault, das seit Monaten niemand
+# nachgesehen hat".
+#   updated   – wann die Note zuletzt inhaltlich geaendert wurde
+#   geprueft  – wann sie zuletzt gegen die Wirklichkeit gehalten wurde;
+#               fehlt bewusst, wenn das nie passiert ist
+#   quelle    – gemessen | recherchiert | ueberlegt | agent-entwurf
+CURATION_FIELDS: tuple[str, ...] = ("updated", "geprueft", "quelle")
+
 # Epic 3: Late Chunking
 # BGE-M3 Hard-Limit: 8192 Tokens. Fenster-Ziel mit ~400-Token-Puffer.
 BGE_MAX_TOKENS: int = 8192
@@ -707,8 +717,10 @@ def read_markdown(file_path: Path) -> tuple[str, dict[str, Any]]:
         Tuple (content, metadata):
             content  – Markdown-Inhalt ohne Frontmatter.
             metadata – Frontmatter-Dict. Enthält ``_skip: True`` wenn
-                       ``indexed: false`` gesetzt ist. Domain-Wert wird
-                       mit sanitize() bereinigt (Prompt-Injection-Schutz).
+                       ``indexed: false`` gesetzt ist. Domain und die
+                       Kuratierungsfelder (CURATION_FIELDS) werden mit
+                       sanitize() bereinigt (Prompt-Injection-Schutz); nicht
+                       gesetzte Kuratierungsfelder stehen explizit auf ``None``.
 
     Raises:
         ValueError: Wenn domain fehlt oder leer ist (und indexed nicht false).
@@ -735,6 +747,24 @@ def read_markdown(file_path: Path) -> tuple[str, dict[str, Any]]:
         )
 
     meta["domain"] = sanitize(str(raw_domain).strip())
+
+    # Kuratierungsfelder normalisieren. Sie landen in der Payload und damit in
+    # Suchtreffern, bekommen also dieselbe sanitize()-Behandlung wie die Domain.
+    # PyYAML liefert ein unquotiertes Datum als date-Objekt, ein quotiertes als
+    # String — str() vereinheitlicht beides auf ISO-8601.
+    # Fehlend bleibt bewusst None statt "": Ein leerer String liesse sich nicht
+    # von "nie geprüft" unterscheiden, und genau diese Unterscheidung ist der
+    # ganze Zweck von 'geprueft'.
+    # Diese Felder sind einwertig: ein Datum, oder eines von vier Woertern. Ein
+    # Zeilenumbruch darin ist immer ein Fehler, also wird Whitespace kollabiert,
+    # bevor sanitize() die Separatoren entschaerft.
+    for field in CURATION_FIELDS:
+        raw = meta.get(field)
+        if raw in (None, ""):
+            meta[field] = None
+            continue
+        meta[field] = sanitize(" ".join(str(raw).split()))
+
     return content, meta
 
 
@@ -764,10 +794,13 @@ def make_point(
     domain: str,
     run_id: str,
     content_hash: str,
+    *,
+    curation: dict[str, str | None] | None = None,
 ) -> Any:
     """Erstellt ein Qdrant-PointStruct aus einem embedded Chunk.
 
-    Setzt source_path, domain, run_id und content_hash im Payload.
+    Setzt source_path, domain, run_id, content_hash und – sofern vorhanden –
+    die Kuratierungsfelder (CURATION_FIELDS) im Payload.
 
     Args:
         chunk:        Chunk mit befüllten dense/sparse/colbert-Vektoren.
@@ -775,6 +808,12 @@ def make_point(
         domain:       Domain-Label.
         run_id:       UUID dieses Ingest-Runs (für Upsert-before-Delete-Pattern).
         content_hash: sha256-Hex-Digest der rohen Datei-Bytes (für Vault-Reconcile).
+        curation:     Optional die Werte aus CURATION_FIELDS. Keyword-only und
+                      optional, weil der CLI-/PDF-Pfad kein Frontmatter hat —
+                      dort bleiben die Felder ungesetzt statt leer erfunden.
+                      ``None``-Werte werden **nicht** ins Payload geschrieben:
+                      ein fehlendes Feld ist in Qdrant filterbar ("is_empty"),
+                      ein leerer String wäre nur ein weiterer Wert.
 
     Returns:
         PointStruct bereit für qdrant_client.upsert().
@@ -796,6 +835,22 @@ def make_point(
     )
 
     source_str = str(file_path)
+    payload: dict[str, Any] = {
+        "text": chunk.text,
+        "source": source_str,
+        "source_path": source_str,  # Alias für Service-Queries
+        "chunk_id": chunk.chunk_id,
+        "chunk_offset": chunk.chunk_id,  # Alias für Service-Schema
+        "header": chunk.header,
+        "domain": domain,
+        "run_id": run_id,
+        "content_hash": content_hash,
+    }
+    for field in CURATION_FIELDS:
+        value = (curation or {}).get(field)
+        if value:
+            payload[field] = value
+
     return PointStruct(
         id=stable_uuid(source_str, chunk.chunk_id),
         vector={
@@ -803,17 +858,7 @@ def make_point(
             "sparse": sparse_vec,
             "colbert": chunk.colbert,
         },
-        payload={
-            "text": chunk.text,
-            "source": source_str,
-            "source_path": source_str,  # Alias für Service-Queries
-            "chunk_id": chunk.chunk_id,
-            "chunk_offset": chunk.chunk_id,  # Alias für Service-Schema
-            "header": chunk.header,
-            "domain": domain,
-            "run_id": run_id,
-            "content_hash": content_hash,
-        },
+        payload=payload,
     )
 
 

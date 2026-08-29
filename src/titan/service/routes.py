@@ -83,6 +83,9 @@ def _to_notes_response(aggregates: list[NoteAggregate]) -> NotesResponse:
             domain=a.domain,
             chunk_count=a.chunk_count,
             content_hash=a.content_hash,
+            updated=a.updated,
+            geprueft=a.geprueft,
+            quelle=a.quelle,
         )
         for a in aggregates
     ]
@@ -409,14 +412,22 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         # A6: Upsert-before-Delete mit run_id
         run_id = str(uuid.uuid4())
 
-        from titan.ingest import late_chunk_and_embed, make_point  # lazy imports
+        from titan.ingest import CURATION_FIELDS, late_chunk_and_embed, make_point  # lazy imports
 
         new_chunks = late_chunk_and_embed(content, model=state.bge_model)
 
         # Count BEFORE upsert so chunks_deleted reflects the true size of the previous version.
         n_before = repo.count_chunks(source)
 
-        repo.upsert([make_point(c, file_path, domain, run_id, content_hash) for c in new_chunks])
+        # read_markdown() hat die Felder bereits normalisiert und sanitisiert.
+        curation = {field: meta.get(field) for field in CURATION_FIELDS}
+
+        repo.upsert(
+            [
+                make_point(c, file_path, domain, run_id, content_hash, curation=curation)
+                for c in new_chunks
+            ]
+        )
         repo.delete_stale_runs(source, keep_run_id=run_id)
 
         # Domain-Counter aktualisieren (A10: Cache-Invalidierung folgt nach diesem Block)
