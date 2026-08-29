@@ -10,6 +10,7 @@ Textstellen stehen unveraendert in coolify-prod.
 from __future__ import annotations
 
 from datetime import date
+from pathlib import Path
 
 from titan.tools.offene_punkte import (
     H_IDEEN,
@@ -20,6 +21,7 @@ from titan.tools.offene_punkte import (
     _tage,
     _zerlege,
     unindiziert,
+    versteckt,
 )
 
 # ─── _abschnitt ──────────────────────────────────────────────────────────────
@@ -171,3 +173,11 @@ def test_bericht_und_anweisungen_werden_uebersprungen() -> None:
     assert unindiziert("---\nindexed: false\n---\n\n# Bericht\n")
     assert not unindiziert("---\ndomain: betrieb\n---\n\n# Notiz\n")
     assert not unindiziert("# Ganz ohne Frontmatter\n")
+
+
+def test_versteckte_ordner_werden_uebersprungen(tmp_path: Path) -> None:
+    """Regression: der Bericht las .claude/skills/*/SKILL.md mit."""
+    (tmp_path / "notes").mkdir()
+    (tmp_path / ".claude" / "skills" / "x").mkdir(parents=True)
+    assert versteckt(tmp_path / ".claude" / "skills" / "x" / "SKILL.md", tmp_path)
+    assert not versteckt(tmp_path / "notes" / "betrieb" / "a.md", tmp_path)

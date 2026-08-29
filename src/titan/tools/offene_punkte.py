@@ -91,6 +91,17 @@ def _domain(text: str) -> str:
     return m.group(1) if m else "?"
 
 
+def versteckt(pfad: Path, wurzel: Path) -> bool:
+    """Liegt der Pfad in einem Ordner, der mit einem Punkt beginnt?
+
+    Dieselbe Regel wie ``_should_ignore`` im Watcher von brain-mcp. Ohne sie
+    liest der Bericht ``.claude/skills/*/SKILL.md`` mit und meldet dessen
+    Beispiel-Ueberschriften als Konventionsbruch - der Skill, der die Konvention
+    definiert, wuerde sie scheinbar brechen.
+    """
+    return any(teil.startswith(".") for teil in pfad.relative_to(wurzel).parts)
+
+
 def unindiziert(text: str) -> bool:
     """`indexed: false` heisst: keine Notiz, sondern Anweisung oder Bericht.
 
@@ -164,7 +175,7 @@ def sammle(wurzel: Path, ueberschrift: str) -> tuple[list[dict[str, Any]], list[
     treffer: list[dict[str, Any]] = []
     hinweise: list[str] = []
     for pfad in sorted(wurzel.rglob("*.md")):
-        if ".git" in pfad.parts:
+        if versteckt(pfad, wurzel):
             continue
         text = pfad.read_text(encoding="utf-8", errors="replace")
         if unindiziert(text):
