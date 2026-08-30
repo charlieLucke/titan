@@ -618,6 +618,14 @@ def hybrid_search_with_rerank(
             "text": hit.payload.get("text", ""),
             "domain": hit.payload.get("domain", ""),
             "chunk_offset": hit.payload.get("chunk_id", 0),
+            # Herkunft mitgeben. Ohne diese drei Zeilen sieht ein Treffer aus
+            # wie jeder andere — ein ungepruefter Agenten-Entwurf ist dann nicht
+            # von einer gemessenen Notiz zu unterscheiden. Genau die
+            # Kontaminationsschleife, vor der plan-second-brain 3.3 warnt:
+            # Agent schreibt -> wird indexiert -> liest es als Wahrheit zurueck.
+            "quelle": hit.payload.get("quelle"),
+            "geprueft": hit.payload.get("geprueft"),
+            "updated": hit.payload.get("updated"),
         }
         for rank, hit in enumerate(hits)
     ]
