@@ -34,6 +34,7 @@ import logging
 import re
 import sys
 import uuid
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
@@ -103,6 +104,33 @@ OVERLAP_CHARS: int = 400
 # Harte Obergrenze, gegen die make_point prueft. Unter Qdrants 1024 mit Puffer
 # fuer dense und sparse im selben Punkt.
 MAX_COLBERT_ROWS: int = 1_000
+
+# Sicherheitsabstand zur harten Grenze: BGE-M3 haengt [CLS]/[SEP] an, und die
+# Zaehlung hier laeuft ueber denselben Tokenizer, aber nicht ueber dieselbe
+# Code-Bahn wie das spaetere Embedding.
+TOKEN_BUDGET: int = MAX_COLBERT_ROWS - 16
+
+# Unterhalb dieser Laenge kann kein Chunk die Grenze reissen. Die dichteste
+# Stelle im Vault liegt bei 1,91 Zeichen je Token (gemessen 30.08.2026 ueber
+# alle 478 Chunks). Wer darunter bleibt, muss nicht tokenisiert werden — das
+# spart bei normaler Prosa fast jeden Aufruf.
+TOKEN_PRUEF_AB_CHARS: int = int(1.9 * TOKEN_BUDGET)
+
+_TOKENIZER: Any = None
+
+
+def zaehle_tokens(text: str) -> int:
+    """Tokens nach BGE-M3. Laeuft auf der CPU, braucht kein VRAM.
+
+    Lazy geladen, damit Tests und Werkzeuge, die nur chunken, das
+    Modellverzeichnis nicht anfassen muessen.
+    """
+    global _TOKENIZER
+    if _TOKENIZER is None:
+        from transformers import AutoTokenizer
+
+        _TOKENIZER = AutoTokenizer.from_pretrained("BAAI/bge-m3")
+    return len(_TOKENIZER.encode(text))
 
 
 class ChunkTooLargeError(ValueError):
@@ -227,7 +255,11 @@ def extract_wikilinks(markdown: str) -> list[str]:
     return sorted(z for z in ziele if z)
 
 
-def chunk_markdown(markdown: str, source_path: Path) -> list[Chunk]:
+def chunk_markdown(
+    markdown: str,
+    source_path: Path,
+    zaehle: Callable[[str], int] | None = None,
+) -> list[Chunk]:
     """Zerschneidet Markdown-Text an Headern (h1–h2) in semantische Chunks.
 
     Strategie:
@@ -246,12 +278,17 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[Chunk]:
     Returns:
         Liste von Chunk-Objekten (ohne Embeddings).
     """
+    zaehler = zaehle or zaehle_tokens
     matches = list(_HEADER_RE.finditer(markdown))
 
     global_chunk_id = 0
 
     first_h1 = re.search(r"^#\s+(.+)$", markdown, flags=re.MULTILINE)
     document_title = first_h1.group(1).strip() if first_h1 else source_path.stem
+
+    def _passt(text: str) -> bool:
+        """Kurze Stuecke gar nicht erst tokenisieren — siehe TOKEN_PRUEF_AB_CHARS."""
+        return len(text) <= TOKEN_PRUEF_AB_CHARS or zaehler(text) <= TOKEN_BUDGET
 
     def _split_text(text: str, header: str) -> list[Chunk]:
         nonlocal global_chunk_id
@@ -271,6 +308,17 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[Chunk]:
                         break
             else:
                 split = end
+
+            # Die Zeichengrenze allein genuegt nicht: Qdrant zaehlt eine
+            # ColBERT-Zeile je *Token*. Bei Pfaden, Tabellen und Code faellt die
+            # Dichte unter drei Zeichen je Token, und ein Stueck unter 2800
+            # Zeichen reisst trotzdem die Grenze. Passiert am 30.08.2026 mit
+            # 1007 Tokens aus 2654 Zeichen — die Notiz blieb danach still mit
+            # ihrem alten Stand im Index.
+            while split - pos > 200 and not _passt(text[pos:split].strip()):
+                kuerzer = pos + int((split - pos) * 0.8)
+                wort = text.rfind(" ", pos + 200, kuerzer)
+                split = (wort + 1) if wort > pos else kuerzer
 
             sub_text = text[pos:split].strip()
             if sub_text:
@@ -328,7 +376,7 @@ def chunk_markdown(markdown: str, source_path: Path) -> list[Chunk]:
             continue
         header_title = match.group(1).lstrip("#").strip()
 
-        if len(text) <= MAX_SUPER_CHUNK_CHARS:
+        if len(text) <= MAX_SUPER_CHUNK_CHARS and _passt(text):
             chunks.append(
                 Chunk(
                     text=text,
