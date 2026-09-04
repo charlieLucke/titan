@@ -171,6 +171,8 @@ Im Deployment läuft er als systemd-User-Service (`titan-service`); siehe `deplo
 | `POST /ingest/file` | Eine Markdown-Datei indexieren (upsert-before-delete via `run_id`). |
 | `GET /domains` | Alle Domains im Index mit Chunk-Anzahl. |
 | `GET /notes` | Alle indexierten Notizen, gruppiert nach Quellpfad, mit Domain + Chunk-Anzahl. |
+| `GET /reports/graph_check` | Link-Graph: tote Links, verwaiste Notizen, meistverlinkte. Derselbe Bericht wie `python -m titan.tools.graph_check --json`. |
+| `GET /reports/offene_punkte` | Offene Punkte aus allen Notizen, älteste zuerst. `?ideen=true` sammelt stattdessen die „Ideen"-Abschnitte. |
 | `POST /find_related` | Notizen, die einer gegebenen Notiz semantisch ähnlich sind. |
 | `DELETE /chunks` | Alle Chunks einer Datei entfernen (nach `source_path`). |
 

@@ -25,7 +25,7 @@ import logging
 import time
 import uuid
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import requests
 import torch
@@ -53,6 +53,7 @@ from titan.service.schemas import (
 )
 from titan.service.state import state
 from titan.service.stats import build_stats
+from titan.tools import graph_check, offene_punkte
 
 # Aliase auf die zentralen Settings (Import-Zeit-Snapshot; Tests patchen die
 # Modul-Attribute, der Service liest Konfiguration ohnehin nur beim Start).
@@ -572,6 +573,40 @@ def delete_chunks(source_path: str) -> DeleteChunksResponse:
 
 
 # ─── Notes (A11 + A12) ───────────────────────────────────────────────────────
+
+
+@router.get("/reports/graph_check")
+def graph_check_report() -> dict[str, Any]:
+    """Der Graph-Bericht: tote Links, verwaiste Notizen, meistverlinkte.
+
+    Dasselbe, was `python -m titan.tools.graph_check --json` ausgibt — hier aber
+    ohne dass jemand einen Befehl auswendig kennen muss, und ohne den Umweg über
+    einen HTTP-Aufruf an den eigenen Dienst: die Notizen kommen direkt aus dem
+    Repository, `bericht()` rechnet unverändert darauf.
+    """
+    aggregates = _repo().aggregate_notes()
+    notes = [{"source_path": a.source_path, "links": list(a.links or [])} for a in aggregates]
+    return graph_check.bericht(notes)
+
+
+@router.get("/reports/offene_punkte")
+def offene_punkte_report(ideen: bool = False) -> dict[str, Any]:
+    """Die offenen Punkte aus allen Notizen, aelteste zuerst.
+
+    Args:
+        ideen: Statt „Offene Punkte" den Abschnitt „Ideen" sammeln.
+
+    Liest den Vault von der Platte, nicht den Index: ein offener Punkt kann in
+    einer Notiz stehen, die gerade nicht indiziert ist, und genau der faellt sonst
+    hinten runter.
+    """
+    ueberschrift = offene_punkte.H_IDEEN if ideen else offene_punkte.H_OFFEN
+    treffer, hinweise = offene_punkte.sammle(VAULT_ROOT, ueberschrift)
+    return {
+        "ueberschrift": ueberschrift,
+        "punkte": offene_punkte.sortiert(treffer),
+        "hinweise": hinweise,
+    }
 
 
 @router.get("/notes", response_model=NotesResponse)

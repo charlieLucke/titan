@@ -211,7 +211,7 @@ def _alter(seit: str | None, heute: date) -> int | None:
         return None
 
 
-def _sortiert(treffer: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def sortiert(treffer: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rang = {zeichen: i for i, (zeichen, _) in enumerate(STUFEN)}
     # Innerhalb einer Stufe das aelteste zuerst: Was am laengsten liegt, ist das,
     # was am ehesten vergessen wurde. Ohne Datum ans Ende - das ist kein alter
@@ -315,7 +315,7 @@ def main() -> int:
 
     alle, hinweise = sammle(args.vault, H_IDEEN if args.ideen else H_OFFEN)
     erledigt = sum(1 for e in alle if e["erledigt"])
-    treffer = _sortiert(alle if args.alle else [e for e in alle if not e["erledigt"]])
+    treffer = sortiert(alle if args.alle else [e for e in alle if not e["erledigt"]])
     heute = date.today()
     for e in treffer:
         e["alter_tage"] = _alter(e["seit"], heute)

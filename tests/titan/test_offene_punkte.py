@@ -17,9 +17,9 @@ from titan.tools.offene_punkte import (
     H_OFFEN,
     _abschnitt,
     _alter,
-    _sortiert,
     _tage,
     _zerlege,
+    sortiert,
     unindiziert,
     versteckt,
 )
@@ -133,17 +133,17 @@ def _p(marker: str, seit: str | None) -> dict[str, object]:
 
 
 def test_dringend_vor_wichtig_vor_rest() -> None:
-    reihe = _sortiert([_p("", "2026-01-01"), _p("⚠️", "2026-01-01"), _p("🔴", "2026-01-01")])
+    reihe = sortiert([_p("", "2026-01-01"), _p("⚠️", "2026-01-01"), _p("🔴", "2026-01-01")])
     assert [e["marker"] for e in reihe] == ["🔴", "⚠️", ""]
 
 
 def test_innerhalb_der_stufe_aeltestes_zuerst() -> None:
-    reihe = _sortiert([_p("🔴", "2026-08-01"), _p("🔴", "2026-01-01")])
+    reihe = sortiert([_p("🔴", "2026-08-01"), _p("🔴", "2026-01-01")])
     assert [e["seit"] for e in reihe] == ["2026-01-01", "2026-08-01"]
 
 
 def test_ohne_datum_ans_ende_der_stufe() -> None:
-    reihe = _sortiert([_p("🔴", None), _p("🔴", "2026-08-01")])
+    reihe = sortiert([_p("🔴", None), _p("🔴", "2026-08-01")])
     assert [e["seit"] for e in reihe] == ["2026-08-01", None]
 
 

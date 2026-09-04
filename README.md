@@ -167,6 +167,8 @@ In deployment it runs as a systemd user service (`titan-service`); see `deploy/`
 | `POST /ingest/file` | Index a Markdown file (upsert-before-delete via `run_id`). |
 | `GET /domains` | All domains in the index with chunk counts. |
 | `GET /notes` | All indexed notes grouped by source path, with domain + chunk count. |
+| `GET /reports/graph_check` | Link graph: dead links, orphans, most-linked. Same report as `python -m titan.tools.graph_check --json`. |
+| `GET /reports/offene_punkte` | Open points from every note, oldest first. `?ideen=true` collects the "Ideen" sections instead. |
 | `POST /find_related` | Notes semantically similar to a given note. |
 | `DELETE /chunks` | Remove all chunks of a file (by `source_path`). |
 

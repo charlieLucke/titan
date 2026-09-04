@@ -171,3 +171,21 @@ personal vault (a few hundred/thousand chunks).
 **Consequences:** The suite runs again (19/20 green). An occasional grpc error on the collection
 teardown of the last test remains — separate teardown robustness, open. Integration tests must run
 with `titan-service` stopped (BGE-M3 GPU lock).
+
+## 2026-09-05: Serve the two vault reports over HTTP
+**Decision:** `GET /reports/graph_check` and `GET /reports/offene_punkte` next to the
+existing endpoints, returning what `titan.tools.graph_check` and
+`titan.tools.offene_punkte` already compute. `_sortiert` became `sortiert`: it is
+called from outside its module now, so the underscore was wrong.
+**Reasoning:** `plan-zentrales-dashboard` Phase 4b wants these two as reports in a
+browser rather than as remembered commands. They were assumed to live in brain-mcp;
+they are here, and titan already serves HTTP — so this is two thin routes rather than a
+new transport, a new token and a new client somewhere else.
+**Consequences:** `graph_check_report` reads the repository directly instead of calling
+`graph_check.sammle`, which fetches `GET /notes` over HTTP — inside the service that
+would be the process asking itself over the network. `offene_punkte_report` keeps
+reading the vault from disk rather than from the index, deliberately: an open point can
+sit in a note that is not indexed right now, and that is exactly the one that would
+otherwise fall out. Both are unauthenticated like the rest of titan's API, which binds
+loopback — if that ever changes, these expose vault content and need the same treatment
+as everything else.
