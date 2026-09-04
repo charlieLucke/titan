@@ -34,7 +34,7 @@ decision** — stop and surface it rather than changing the interface here.
 
 ## You are part of a larger system
 
-This repo does not stand alone. It is one service in `rag-system`. Before changing
+This repo does not stand alone. It is one service in `stack-workspace`. Before changing
 anything that another repo can observe:
 
 - Check whether the change crosses a **contract**. If it does, stop — that is a workspace
