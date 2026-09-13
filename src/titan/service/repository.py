@@ -64,7 +64,7 @@ class QdrantRepository:
         try:
             self._client.get_collection(self._collection)
             return True
-        except Exception:
+        except Exception:  # noqa: BLE001 — ein Health-Check beantwortet genau eine Frage: erreichbar ja/nein
             return False
 
     def count_chunks(self, source_path: str) -> int:

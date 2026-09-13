@@ -212,7 +212,7 @@ def parse_pdfs_parallel(pdf_paths: list[Path]) -> list[tuple[Path, str]]:
                 path, md = future.result()
                 results.append((path, md))
             except Exception:
-                log.error("Parsing fehlgeschlagen: %s", source_path.name, exc_info=True)
+                log.exception("Parsing fehlgeschlagen: %s", source_path.name)
 
     log.info("Parsing abgeschlossen: %d/%d Dateien erfolgreich", len(results), n)
     return results
@@ -730,7 +730,7 @@ def build_qdrant_client() -> Any:
             hnsw_config=HnswConfigDiff(m=0, payload_m=16),
         )
         log.info("HNSW-Tuning gesetzt: m=0 (kein globaler Graph), payload_m=16.")
-    except Exception:
+    except Exception:  # noqa: BLE001 — idempotentes Setup: schon korrekt gesetzt ist kein Fehler
         log.warning(
             "HNSW-Tuning konnte nicht gesetzt werden (ggf. bereits korrekt).", exc_info=True
         )
@@ -742,7 +742,7 @@ def build_qdrant_client() -> Any:
             field_schema=PayloadSchemaType.KEYWORD,
         )
         log.info("Payload-Index auf 'domain' bereit.")
-    except Exception:
+    except Exception:  # noqa: BLE001 — idempotentes Setup: existiert bereits ist kein Fehler
         log.warning(
             "Payload-Index für 'domain' konnte nicht angelegt werden (ggf. existiert).",
             exc_info=True,

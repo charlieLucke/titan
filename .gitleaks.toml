@@ -1,0 +1,19 @@
+# gitleaks — secret scan. Runs in pre-commit on staged changes and in CI over the
+# full history, because a secret that is only gone from the tip is not gone.
+#
+# The default rule set does the detecting. This file only records the values that
+# look like a secret and are not, so a real finding is never lost in the noise.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Published test vectors and fixture tokens"
+regexes = [
+  # RFC 6238 TOTP test key (base32 of "12345678901234567890"). It is printed in
+  # the RFC; a test that used a different key would be testing something else.
+  '''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''',
+  # Not GitHub tokens: the strings a test hands a verifier that must accept or
+  # reject them. A real `gho_` token has 36 more characters and is not in here.
+  '''gho_(stub|x)\b''',
+]

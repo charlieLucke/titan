@@ -17,6 +17,12 @@ dependencies = [
     "requests>=2.34.0",
     "torch>=2.11.0",
     "uvicorn[standard]>=0.46.0",
+    # Imported directly in src/, so declared directly. Leaning on fastapi or
+    # fastmcp to keep pulling these in is a transitive dependency the audit
+    # flags (DEP003): the day either drops one, this breaks at import time.
+    "pydantic>=2.0",
+    "transformers>=4.40",
+    "pyyaml>=6.0",
 ]
 
 [dependency-groups]
@@ -54,6 +60,18 @@ select = [
     "N",   # pep8-naming
     "SIM", # flake8-simplify
     "RUF", # ruff-specific rules
+
+    # --- AI-code audit gate -------------------------------------------------
+    # Added 2026-09-13 after auditing every repo against the "bad AI code"
+    # catalogue. These four are the rules that catalogue turns into findings:
+    # a broad catch that hides a failure, an assert standing in for validation,
+    # a request without a timeout, an f-string inside a log call, and an import
+    # buried in a function body. Each one is allowed where it is justified —
+    # but then it carries a `noqa` that says why, instead of passing silently.
+    "BLE",     # blind `except Exception`
+    "S",       # flake8-bandit: assert-as-validation, missing timeout, shell=True
+    "G",       # logging: no f-strings in log calls
+    "PLC0415", # import inside a function — deferred imports must justify themselves
 ]
 ignore = [
     "RUF001",  # ambiguous unicode in strings — intentional German en-dash typography
@@ -62,8 +80,33 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**/*.py" = ["S101"]  # allow `assert` in tests
+"tests/**/*.py" = [
+    "S101",    # assert is the point of a test
+    "S105",    # fake tokens in fixtures are not secrets
+    "S106",
+    "PLC0415", # a test may import inside the test that needs it
+    "S108",    # "/tmp/..." in a test is a path literal, not a temp file
+    "S104",    # a test may assert that "0.0.0.0" is accepted
+]
 "src/titan/evaluate.py" = ["E501"]  # long German judge prompts in string constants
+
+# --- AI-code audit gate: justified exceptions ------------------------------
+# Every entry below states why the rule does not apply here. A file that is not
+# listed still has to pass, so a new blind catch or a new deferred import fails
+# the gate instead of blending in.
+# Deferred imports of the model stack are deliberate. torch, FlagEmbedding and
+# transformers cost seconds and VRAM at import time; loading them when the CLI
+# only prints --help, or in a worker that never searches, is the bug we avoid.
+"src/titan/ingest.py" = ["PLC0415"]
+"src/titan/infra.py" = ["PLC0415"]
+"src/titan/search.py" = ["BLE001", "PLC0415"]  # optional query cache (logged, falls through live) + deferred qdrant models
+"src/titan/service/routes.py" = ["PLC0415"]
+"src/titan/service/repository.py" = ["PLC0415"]
+"src/titan/eval/ab_eval.py" = ["PLC0415"]
+"src/titan/service/_vram_probe.py" = ["BLE001", "PLC0415"]  # probes torch/FlagEmbedding on demand; importing them to answer /health would defeat the probe
+"src/titan/main.py" = ["PLC0415"]      # the dispatcher imports `serve` only for the `service` subcommand, so `python -m titan` stays instant
+"src/titan/service/app.py" = ["PLC0415"]  # `from titan.search import ...` inside the task breaks a circular import at module load
+"src/titan/utils.py" = ["PLC0415"]     # fcntl is Unix-only and imported where the lock is taken
 
 [tool.ruff.format]
 quote-style = "double"
@@ -132,3 +175,22 @@ exclude_lines = [
     "if TYPE_CHECKING:",
     "if __name__ == .__main__.:",
 ]
+
+# ---------- deptry (dependency audit) ----------
+# Catches the three dependency defects the AI-code audit looks for: a package
+# imported but never declared, a package declared but never imported, and a
+# hallucinated name that resolves to nothing. The map below exists because the
+# import name and the package name differ — without it deptry reports both
+# halves of the same pair and the check stops meaning anything.
+[tool.deptry]
+known_first_party = ["titan"]
+exclude = [".venv", "tests", "evals", "tools"]
+
+[tool.deptry.package_module_name_map]
+python-docx = ["docx"]
+beautifulsoup4 = ["bs4"]
+pyyaml = ["yaml"]
+python-dotenv = ["dotenv"]
+python-frontmatter = ["frontmatter"]
+flagembedding = ["FlagEmbedding"]
+qdrant-client = ["qdrant_client"]

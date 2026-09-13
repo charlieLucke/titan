@@ -38,3 +38,10 @@ repos:
           - torch>=2.0
           - httpx>=0.24
           - types-pyyaml>=6.0
+
+  # gitleaks: no secret reaches a commit. The repos here are meant to go public,
+  # and a secret in history is not removed by deleting it from the tip.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.24.0
+    hooks:
+      - id: gitleaks

@@ -1,0 +1,15 @@
+{
+  "threshold": 3.0,
+  "minLines": 5,
+  "minTokens": 50,
+  "reporters": ["console"],
+  "absolute": true,
+  "gitignore": true,
+  "ignore": [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/dist/**",
+    "**/tests/**",
+    "**/imported/**"
+  ]
+}

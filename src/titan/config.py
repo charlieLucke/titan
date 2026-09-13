@@ -53,7 +53,10 @@ class TitanSettings(BaseSettings):
     cache_top_k: int = 1
 
     # ── GPU-Lock (systemweiter VRAM-Schutz, siehe utils.acquire_gpu_lock) ─
-    gpu_lock_path: str = "/tmp/bge_m3.lock"
+    # noqa-Begruendung: der Lock muss systemweit sein — jeder Prozess, der die GPU
+    # belegt, muss denselben Pfad sehen. Ein Pfad unter $TMPDIR waere pro Nutzer
+    # verschieden und der Lock damit wirkungslos. Konfigurierbar, falls das stoert.
+    gpu_lock_path: str = "/tmp/bge_m3.lock"  # noqa: S108
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

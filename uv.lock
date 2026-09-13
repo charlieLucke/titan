@@ -3428,12 +3428,15 @@ dependencies = [
     { name = "flagembedding" },
     { name = "httpx" },
     { name = "packaging" },
+    { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
     { name = "python-frontmatter" },
+    { name = "pyyaml" },
     { name = "qdrant-client" },
     { name = "requests" },
     { name = "torch" },
+    { name = "transformers" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -3454,12 +3457,15 @@ requires-dist = [
     { name = "flagembedding", specifier = ">=1.4.0" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "packaging", specifier = ">=24.0" },
+    { name = "pydantic", specifier = ">=2.0" },
     { name = "pydantic-settings", specifier = ">=2.5" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "python-frontmatter", specifier = ">=1.1.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "qdrant-client", specifier = ">=1.18.0" },
     { name = "requests", specifier = ">=2.34.0" },
     { name = "torch", specifier = ">=2.11.0" },
+    { name = "transformers", specifier = ">=4.40" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.46.0" },
 ]
 

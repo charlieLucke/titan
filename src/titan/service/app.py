@@ -137,7 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     try:
         state.domain_counts = _init_domain_counts(state.qdrant_client)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — der Zaehler ist Komfort; der Service startet auch ohne ihn
         log.warning("Domain-Counter-Init fehlgeschlagen (Service läuft weiter): %s", exc)
         state.domain_counts = Counter()
 

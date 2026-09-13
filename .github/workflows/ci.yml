@@ -28,6 +28,17 @@ jobs:
       - name: Install dependencies
         run: uv sync --all-extras --dev
 
+      - name: Secret scan (gitleaks, full history)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dependency audit (deptry)
+        run: uvx deptry@0.23.0 .
+
+      - name: Duplication (jscpd, fails above 3%)
+        run: npx --yes jscpd@4.0.5 src --config .jscpd.json
+
       - name: Lint (ruff)
         run: uv run ruff check .
 
