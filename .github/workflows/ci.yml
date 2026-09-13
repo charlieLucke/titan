@@ -16,6 +16,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # gitleaks scans the whole history below, not just this push.
+          fetch-depth: 0
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v3
@@ -29,9 +32,16 @@ jobs:
         run: uv sync --all-extras --dev
 
       - name: Secret scan (gitleaks, full history)
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # The binary rather than gitleaks-action: the action scans the range
+        # base^..head, which needs commits a shallow checkout does not have, and
+        # it fails outright whenever a push carries more than one commit. This
+        # scans what the step name says it scans.
+        run: |
+          curl -sSL --retry 3 -o gitleaks.tar.gz \
+            https://github.com/gitleaks/gitleaks/releases/download/v8.24.0/gitleaks_8.24.0_linux_x64.tar.gz
+          tar xzf gitleaks.tar.gz gitleaks
+          ./gitleaks git . -c .gitleaks.toml --redact --no-banner
+          rm -f gitleaks gitleaks.tar.gz
 
       - name: Dependency audit (deptry)
         run: uvx deptry@0.23.0 .
