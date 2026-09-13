@@ -1,61 +1,61 @@
-# SYSTEM_LINK — this repo is part of a system
+# SYSTEM_LINK — dieses Repo ist Teil eines Systems
 
-> Dropped into each child repo as `docs/ai/SYSTEM_LINK.md` by `./workspace.sh new` and
-> kept in sync by `./workspace.sh sync-shared`. It tells an agent working *inside* this
-> repo that it belongs to a larger system, and where the system brain lives.
+> Wird von `./workspace.sh new` als `docs/ai/SYSTEM_LINK.md` in jedes Child-Repo abgelegt und
+> von `./workspace.sh sync-shared` synchron gehalten. Es teilt einem Agenten, der *innerhalb*
+> dieses Repos arbeitet, mit, dass es zu einem größeren System gehört und wo das System-Hirn liegt.
 
-## This repo
-- **Service name:** titan
-- **Role:** RAG engine — ingest (Docling → Late Chunking → BGE-M3) + hybrid search over Qdrant
-- **Consumes:** —
-- **Exposes:** contracts/titan.openapi.yaml
-- **Port (local):** 8765
+## Dieses Repo
+- **Service-Name:** titan
+- **Rolle:** RAG-Engine — Ingest (Docling → Late Chunking → BGE-M3) + hybride Suche über Qdrant
+- **Konsumiert:** —
+- **Stellt bereit:** contracts/titan.openapi.yaml
+- **Port (lokal):** 8765
 
-## Where the system brain lives
-The coordinating workspace repo holds the cross-repo picture:
-- System map & dependency graph → workspace `docs/ai/SYSTEM.md`
-- Which repo owns what → workspace `docs/ai/ROUTING.md`
-- The contracts this repo must honor → workspace `docs/ai/CONTRACTS.md` + `contracts/`
-- Cross-repo decisions → workspace `docs/ai/DECISIONS.md`
+## Wo das System-Hirn liegt
+Das koordinierende Workspace-Repo hält das Repo-übergreifende Gesamtbild:
+- Systemkarte & Abhängigkeitsgraph → Workspace `docs/ai/SYSTEM.md`
+- Welches Repo was besitzt → Workspace `docs/ai/ROUTING.md`
+- Die Contracts, die dieses Repo einhalten muss → Workspace `docs/ai/CONTRACTS.md` + `contracts/`
+- Repo-übergreifende Entscheidungen → Workspace `docs/ai/DECISIONS.md`
 
-## Rules that override nothing, but add one thing
-Follow this repo's own `CLAUDE.md` for all local work. The one addition from being part of
-a system: **a change at this repo's boundary (its exposed contract) is a workspace-level
-decision** — stop and surface it rather than changing the interface here.
+## Regeln, die nichts überschreiben, aber eine Sache ergänzen
+Folge für alle lokale Arbeit der eigenen `CLAUDE.md` dieses Repos. Die einzige Ergänzung daraus,
+Teil eines Systems zu sein: **eine Änderung an der Grenze dieses Repos (seinem exponierten Contract)
+ist eine Entscheidung auf Workspace-Ebene** — anhalten und ansprechen, statt das Interface hier zu ändern.
 
 <!-- SHARED-AGENT-RULES:START (synced from workspace shared/agent-rules.md — do not edit here) -->
 
-# Shared Agent Rules
+# Gemeinsame Agenten-Regeln
 
-> Canonical convention fragment. The single-repo template's `CLAUDE.md` already carries the
-> per-repo rules; this file is the **system-wide** delta that every child repo must also
-> honor. `./workspace.sh sync-shared` appends/refreshes this block inside each child's
-> `docs/ai/SYSTEM_LINK.md`. Edit it **here only** — never per repo.
+> Kanonisches Konventionsfragment. Die `CLAUDE.md` des Single-Repo-Templates trägt bereits die
+> Per-Repo-Regeln; diese Datei ist das **systemweite** Delta, das jedes Child-Repo zusätzlich
+> einhalten muss. `./workspace.sh sync-shared` hängt diesen Block in der `docs/ai/SYSTEM_LINK.md`
+> jedes Childs an bzw. aktualisiert ihn. Bearbeite ihn **nur hier** — niemals pro Repo.
 
-## You are part of a larger system
+## Du bist Teil eines größeren Systems
 
-This repo does not stand alone. It is one service in `stack-workspace`. Before changing
-anything that another repo can observe:
+Dieses Repo steht nicht für sich allein. Es ist ein Service in `stack-workspace`. Bevor du etwas
+änderst, das ein anderes Repo beobachten kann:
 
-- Check whether the change crosses a **contract**. If it does, stop — that is a workspace
-  (Opus-level) decision, not a local one. Surface it.
-- Your inputs and outputs at the boundary are defined in the workspace `contracts/`.
-  Treat them as fixed unless a workspace plan says otherwise.
-- Keep this repo **standalone-runnable**: don't import another service's code; talk to it
-  only through its contract.
+- Prüfe, ob die Änderung einen **Contract** kreuzt. Falls ja — anhalten: das ist eine Entscheidung
+  auf Workspace-Ebene (Opus-Ebene), keine lokale. Sprich sie an.
+- Deine Inputs und Outputs an der Grenze sind in den Workspace-`contracts/` definiert.
+  Behandle sie als fix, sofern ein Workspace-Plan nichts anderes sagt.
+- Halte dieses Repo **eigenständig lauffähig**: importiere keinen Code eines anderen Service;
+  sprich mit ihm nur über seinen Contract.
 
-## What stays local vs. goes up
+## Was lokal bleibt vs. nach oben geht
 
-- A decision about *this* repo's internals → local `docs/ai/DECISIONS.md`.
-- A decision affecting how this repo talks to others → workspace `docs/ai/DECISIONS.md`.
-- An out-of-scope idea touching only this repo → local `IDEAS.md`; touching others →
-  workspace `IDEAS.md`.
+- Eine Entscheidung über die Interna *dieses* Repos → lokale `docs/ai/DECISIONS.md`.
+- Eine Entscheidung darüber, wie dieses Repo mit anderen spricht → Workspace `docs/ai/DECISIONS.md`.
+- Eine Out-of-Scope-Idee, die nur dieses Repo betrifft → lokale `IDEAS.md`; betrifft sie andere →
+  Workspace `IDEAS.md`.
 
-## Boundary discipline
+## Grenzdisziplin
 
-- Don't widen this repo's public surface casually — every new endpoint/field is a contract.
-- Don't read another service's database, files, or internals directly.
-- When you change behavior at the boundary, the contract change lands *with* the code, and
-  every consumer is updated in the same workspace feature.
+- Erweitere die öffentliche Oberfläche dieses Repos nicht leichtfertig — jeder neue Endpunkt/jedes Feld ist ein Contract.
+- Lies nicht direkt die Datenbank, Dateien oder Interna eines anderen Service.
+- Wenn du Verhalten an der Grenze änderst, landet die Contract-Änderung *zusammen mit* dem Code,
+  und jeder Konsument wird im selben Workspace-Feature aktualisiert.
 
 <!-- SHARED-AGENT-RULES:END -->

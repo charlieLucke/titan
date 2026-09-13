@@ -1,29 +1,29 @@
-# Current Task
+# Aktuelle Aufgabe
 
-> Keep this short. One screen max. Update as you progress.
+> Kurz halten. Maximal ein Bildschirm. Mit dem Fortschritt aktualisieren.
 
-## Goal
+## Ziel
 
-System in production. Ongoing build-out around titan + brain-mcp.
+System in Produktion. Laufender Ausbau rund um titan + brain-mcp.
 
 ## Status
 
-- [x] Phase 1 (titan service layer) + Phase 2 (brain-mcp) completed, audited
-- [x] Claude integration live (brain-mcp HTTP + OAuth + Tailscale Funnel)
-- [x] 2026-05-17: added `GET /notes` (for brain-mcp `list_notes`)
-- [x] 2026-05-17: repaired the integration suite (version drift, 19/20 green)
-- [x] 2026-06-02: Stage 1 — `content_hash` on ingest + `/notes` + `/domains/{domain}/notes`
-      Workspace plan: `docs/ai/plans/2026-06-02_vault-index-startup-reconcile.md`
-      Committed: `149a47c` (titan feat) + `b208bd0` (workspace docs)
-      Quality gate: 40/40 tests green (incl. 2 new integration tests); `./workspace.sh check` green.
+- [x] Phase 1 (titan-Service-Layer) + Phase 2 (brain-mcp) abgeschlossen, auditiert
+- [x] Claude-Integration live (brain-mcp HTTP + OAuth + Tailscale Funnel)
+- [x] 2026-05-17: `GET /notes` ergänzt (für brain-mcp `list_notes`)
+- [x] 2026-05-17: Integrations-Suite repariert (Versions-Drift, 19/20 grün)
+- [x] 2026-06-02: Stage 1 — `content_hash` beim Ingest + `/notes` + `/domains/{domain}/notes`
+      Workspace-Plan: `docs/ai/plans/2026-06-02_vault-index-startup-reconcile.md`
+      Committet: `149a47c` (titan feat) + `b208bd0` (workspace docs)
+      Quality-Gate: 40/40 Tests grün (inkl. 2 neue Integrationstests); `./workspace.sh check` grün.
 
-## Open
+## Offen
 
-- [ ] Flaky grpc error on the teardown of the last integration test
-- [ ] optional: a cached notes counter instead of a full scroll for `/notes`
+- [ ] Flaky grpc-Fehler beim Teardown des letzten Integrationstests
+- [ ] optional: ein gecachter Notes-Zähler statt eines vollständigen Scrolls für `/notes`
 
-## Notes
+## Notizen
 
-- Service order: Docker Desktop → Qdrant → titan-service → brain-mcp/brain-watcher
-- Integration tests only with `titan-service` stopped (BGE-M3 GPU lock)
-- Start/stop: desktop script `RAG-System.bat` or the new `brain-dashboard` (port 9200)
+- Service-Reihenfolge: Docker Desktop → Qdrant → titan-service → brain-mcp/brain-watcher
+- Integrationstests nur bei gestopptem `titan-service` (BGE-M3 GPU-Lock)
+- Start/Stopp: Desktop-Skript `RAG-System.bat` oder das neue `brain-dashboard` (Port 9200)

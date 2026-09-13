@@ -1,149 +1,149 @@
-# Project Context
+# Projektkontext
 
-> Read this first. Keep under 200 lines. Update as the project evolves.
+> Zuerst lesen. Unter 200 Zeilen halten. Mit der Weiterentwicklung des Projekts aktualisieren.
 
-## What this project does
+## Was dieses Projekt macht
 
-Titan is a local, high-performance RAG (Retrieval-Augmented Generation) system on a
-single workstation. It indexes PDFs and Markdown files, splits them into chunks via
-Late Chunking, embeds them with BGE-M3 (multi-vector: dense + sparse + colbert),
-stores them in Qdrant, and answers queries with Reciprocal Rank Fusion + Phi-4 as
-the generator. Designed for single-workstation deployment (no multi-user, no cloud
-deployment).
+Titan ist ein lokales, hochperformantes RAG-System (Retrieval-Augmented Generation)
+auf einer einzigen Workstation. Es indexiert PDFs und Markdown-Dateien, zerlegt sie
+per Late Chunking in Chunks, bettet sie mit BGE-M3 ein (Multi-Vektor: dense +
+sparse + colbert), speichert sie in Qdrant und beantwortet Anfragen mit Reciprocal
+Rank Fusion + Phi-4 als Generator. Auslegung: Single-Workstation-Deployment
+(kein Mehrbenutzerbetrieb, kein Cloud-Deployment).
 
 ## Stack
-- **Language:** Python 3.12+
-- **Package manager:** uv
-- **Test runner:** pytest
-- **Lint/format:** ruff (line length 100, double quotes)
-- **Type checker:** mypy (strict)
+- **Sprache:** Python 3.12+
+- **Paketmanager:** uv
+- **Test-Runner:** pytest
+- **Lint/Format:** ruff (Zeilenlänge 100, doppelte Anführungszeichen)
+- **Typprüfer:** mypy (strict)
 - **CI:** GitHub Actions
-- **Pre-commit:** ruff, mypy, hygiene checks
+- **Pre-commit:** ruff, mypy, Hygiene-Checks
 - **Embeddings:** BGE-M3 via FlagEmbedding (dense + sparse + colbert)
-- **LLM:** Phi-4 via Ollama (local, no API key)
-- **Vector DB:** Qdrant (local, gRPC port 6334)
-- **PDF parsing:** Docling
-- **GPU:** NVIDIA, ~16 GB VRAM, lock via fcntl (`/tmp/bge_m3.lock`)
+- **LLM:** Phi-4 via Ollama (lokal, kein API-Key)
+- **Vektor-DB:** Qdrant (lokal, gRPC-Port 6334)
+- **PDF-Parsing:** Docling
+- **GPU:** NVIDIA, ~16 GB VRAM, Lock via fcntl (`/tmp/bge_m3.lock`)
 
-## Project Layout
+## Projektaufbau
 ```
 src/titan/
 ├── main.py          # Dispatcher: python -m titan service | help
-├── utils.py         # GPU lock, stable_uuid, cache_uuid, sanitize
-├── ingest.py        # PDF parsing (Docling), Markdown reader (frontmatter),
-│                    # Late Chunking, BGE-M3 embed, make_point, Qdrant upsert
-├── search.py        # Query decompose (Phi-4), BGE-M3, RRF, Epic-5B cache
-│                    # search() with injectable model + qdrant_client
-├── generate.py      # Phi-4 answer generation from chunk context
-├── evaluate.py      # LLM-as-judge evaluation (Epic 4)
+├── utils.py         # GPU-Lock, stable_uuid, cache_uuid, sanitize
+├── ingest.py        # PDF-Parsing (Docling), Markdown-Reader (Frontmatter),
+│                    # Late Chunking, BGE-M3 Embedding, make_point, Qdrant-Upsert
+├── search.py        # Query-Zerlegung (Phi-4), BGE-M3, RRF, Epic-5B-Cache
+│                    # search() mit injizierbarem Modell + qdrant_client
+├── generate.py      # Phi-4 Antwortgenerierung aus Chunk-Kontext
+├── evaluate.py      # LLM-as-Judge-Evaluation (Epic 4)
 ├── service/
-│   ├── _vram_probe.py  # VRAM measurement script (run once, manually)
-│   ├── state.py        # ServiceState singleton
-│   ├── app.py          # FastAPI app + lifespan (BGE-M3 singleton, GPU lock)
-│   ├── schemas.py      # Pydantic request/response schemas
-│   └── routes.py       # HTTP endpoints (health, search, ask, ingest, domains, …)
+│   ├── _vram_probe.py  # VRAM-Messskript (einmalig, manuell ausführen)
+│   ├── state.py        # ServiceState-Singleton
+│   ├── app.py          # FastAPI-App + Lifespan (BGE-M3-Singleton, GPU-Lock)
+│   ├── schemas.py      # Pydantic Request/Response-Schemas
+│   └── routes.py       # HTTP-Endpunkte (health, search, ask, ingest, domains, …)
 ├── eval/
-│   ├── ab_eval.py   # A/B eval tool (compares two runs)
+│   ├── ab_eval.py   # A/B-Eval-Tool (vergleicht zwei Läufe)
 │   └── fixtures/
 │       └── cases.json
 └── tools/
     ├── __init__.py
-    └── init_col.py  # Qdrant collection setup
-deploy/              # systemd service file + installation guide
+    └── init_col.py  # Qdrant-Collection-Setup
+deploy/              # systemd-Service-Datei + Installationsanleitung
 tests/
-├── titan/           # Unit tests (mirrors src/titan/)
-└── integration/     # Service integration tests (pytest.mark.integration)
-docs/ai/             # AI agent docs
+├── titan/           # Unit-Tests (spiegelt src/titan/)
+└── integration/     # Service-Integrationstests (pytest.mark.integration)
+docs/ai/             # Doku für KI-Agenten
 .github/workflows/   # CI
 ```
 
-## Conventions
+## Konventionen
 
-### Code style
-- Line length: 100
-- Quotes: double
-- Type hints required on all function signatures (mypy strict)
-- `from __future__ import annotations` at top of every module
-- Docstrings: Google style for public APIs
+### Code-Stil
+- Zeilenlänge: 100
+- Anführungszeichen: doppelt
+- Type-Hints auf allen Funktionssignaturen erforderlich (mypy strict)
+- `from __future__ import annotations` am Anfang jedes Moduls
+- Docstrings: Google-Stil für öffentliche APIs
 
-### Error handling
-- Raise specific exceptions, not bare `Exception`
-- No bare `except:` clauses
-- Don't catch exceptions just to silence them
+### Fehlerbehandlung
+- Spezifische Exceptions werfen, kein nacktes `Exception`
+- Keine nackten `except:`-Klauseln
+- Exceptions nicht abfangen, nur um sie zu verschlucken
 
-### Naming
-- Modules: `lower_snake_case`
-- Classes: `PascalCase`
-- Functions/variables: `lower_snake_case`
-- Constants: `UPPER_SNAKE_CASE`
-- Private: leading underscore
+### Benennung
+- Module: `lower_snake_case`
+- Klassen: `PascalCase`
+- Funktionen/Variablen: `lower_snake_case`
+- Konstanten: `UPPER_SNAKE_CASE`
+- Privat: führender Unterstrich
 
 ### Testing
-- One test file per source module: `src/titan/foo.py` → `tests/titan/test_foo.py`
-- Use pytest fixtures, not `setUp`/`tearDown`
-- Mark slow tests with `@pytest.mark.slow`
-- Mark integration tests with `@pytest.mark.integration`
+- Eine Testdatei pro Quellmodul: `src/titan/foo.py` → `tests/titan/test_foo.py`
+- pytest-Fixtures verwenden, nicht `setUp`/`tearDown`
+- Langsame Tests mit `@pytest.mark.slow` markieren
+- Integrationstests mit `@pytest.mark.integration` markieren
 
 ### Commits
-- Format: `<type>: <subject>` (types: feat, fix, refactor, test, docs, chore)
-- Imperative mood: "add X" not "added X"
-- One logical change per commit
+- Format: `<type>: <subject>` (Typen: feat, fix, refactor, test, docs, chore)
+- Imperativ: „add X" nicht „added X"
+- Eine logische Änderung pro Commit
 
-## Commands (always use these)
-- `make install` — install deps and pre-commit hooks
-- `make test` — run tests with coverage
-- `make test-fast` — skip slow + integration tests
-- `make check` — full quality gate (lint + types + tests)
-- `make format` — auto-fix style
+## Befehle (immer diese verwenden)
+- `make install` — Abhängigkeiten und pre-commit-Hooks installieren
+- `make test` — Tests mit Coverage ausführen
+- `make test-fast` — langsame + Integrationstests überspringen
+- `make check` — vollständiges Quality-Gate (Lint + Typen + Tests)
+- `make format` — Stil automatisch korrigieren
 
-## Service commands
-- `uv run python -m titan service` — start the service (port 8765)
-- `uv run python -m titan service --port 9000` — alternative port
-- `uv run python -m titan.service._vram_probe` — run the VRAM probe
-- `uv run pytest tests/integration/ -m integration -v` — integration tests
-- `curl localhost:8765/health` — check service health
+## Service-Befehle
+- `uv run python -m titan service` — Service starten (Port 8765)
+- `uv run python -m titan service --port 9000` — alternativer Port
+- `uv run python -m titan.service._vram_probe` — VRAM-Probe ausführen
+- `uv run pytest tests/integration/ -m integration -v` — Integrationstests
+- `curl localhost:8765/health` — Service-Health prüfen
 
-## Environment Variables (.env)
-See `.env.example` for all variables. Key ones:
+## Umgebungsvariablen (.env)
+Siehe `.env.example` für alle Variablen. Die wichtigsten:
 - `QDRANT_HOST`, `QDRANT_GRPC_PORT`, `COLLECTION_NAME`
-- `GPU_LOCK_PATH` — default `/tmp/bge_m3.lock`
-- `INGEST_BASE_DIR` — input directory for PDFs, default `/mnt/f/data/titan-input`
-  (example from the author's WSL2 setup; freely configurable)
+- `GPU_LOCK_PATH` — Default `/tmp/bge_m3.lock`
+- `INGEST_BASE_DIR` — Eingabeverzeichnis für PDFs, Default `/mnt/f/data/titan-input`
+  (Beispiel aus dem WSL2-Setup des Autors; beliebig wählbar)
 - `OLLAMA_URL`, `OLLAMA_MODEL` — Phi-4 via Ollama
-- `CACHE_ENABLED`, `CACHE_COLLECTION_NAME` — Epic 5B semantic cache
+- `CACHE_ENABLED`, `CACHE_COLLECTION_NAME` — Epic-5B Semantic Cache
 
-## Known pitfalls
-- `torch` installed via `uv add` defaults to the CPU wheel. After installing, verify:
-  `uv run python -c "import torch; print(torch.cuda.is_available())"` → must be `True`.
-  Otherwise add the CUDA index in `pyproject.toml` via `[[tool.uv.index]]`.
-- `flagembedding`, `docling` and `frontmatter` ship no type stubs → mypy `ignore_missing_imports = true`
-  for these modules (see `pyproject.toml` `[[tool.mypy.overrides]]`).
-- GPU lock: `acquire_gpu_lock()` must keep the returned handle alive until the process ends.
-  Don't capture it in a temporary variable that immediately goes out of scope.
-- FastAPI decorators are `untyped-decorator` under mypy strict → override needed in `pyproject.toml`
-  for `titan.service.routes`.
-- pre-commit mypy hook: needs pydantic/fastapi/torch/httpx as `additional_dependencies`
-  in `.pre-commit-config.yaml`, otherwise "BaseModel has type Any".
-- `qdrant_client.count()` returns `.count` as `Any` → cast explicitly with `int()`.
-- WSL2 systemd: `/etc/wsl.conf` must contain `[boot]\nsystemd=true`.
-  After changing it: `wsl --shutdown` from PowerShell.
+## Bekannte Fallstricke
+- `torch` via `uv add` installiert standardmäßig das CPU-Wheel. Nach der Installation prüfen:
+  `uv run python -c "import torch; print(torch.cuda.is_available())"` → muss `True` sein.
+  Andernfalls den CUDA-Index in `pyproject.toml` via `[[tool.uv.index]]` ergänzen.
+- `flagembedding`, `docling` und `frontmatter` liefern keine Type-Stubs → mypy `ignore_missing_imports = true`
+  für diese Module (siehe `pyproject.toml` `[[tool.mypy.overrides]]`).
+- GPU-Lock: `acquire_gpu_lock()` muss das zurückgegebene Handle bis zum Prozessende am Leben halten.
+  Nicht in einer temporären Variable erfassen, die sofort aus dem Scope fällt.
+- FastAPI-Dekoratoren sind unter mypy strict `untyped-decorator` → Override in `pyproject.toml`
+  für `titan.service.routes` nötig.
+- pre-commit mypy-Hook: benötigt pydantic/fastapi/torch/httpx als `additional_dependencies`
+  in `.pre-commit-config.yaml`, sonst „BaseModel has type Any".
+- `qdrant_client.count()` gibt `.count` als `Any` zurück → explizit mit `int()` casten.
+- WSL2 systemd: `/etc/wsl.conf` muss `[boot]\nsystemd=true` enthalten.
+  Nach der Änderung: `wsl --shutdown` aus PowerShell.
 
-## Glossary
-- **Late Chunking:** a chunking strategy that embeds the full document context first,
-  then chunks (instead of the other way around). Preserves semantic context across
-  chunk boundaries.
-- **BGE-M3:** embedding model with three vectors per chunk (dense, sparse, colbert).
-- **RRF (Reciprocal Rank Fusion):** fuses multiple ranked lists (dense/sparse/colbert)
-  into one consolidated ranking. k=60 is the default parameter.
-- **Epic 5A:** Contextual Retrieval via Phi-4 summaries — dropped in v1.0, not ported.
-- **Epic 5B:** semantic caching of query results in a separate Qdrant collection.
-- **Domain:** a classification label per document (e.g. `lernen`, `trading`, `titan`).
-  Enables isolated search per knowledge area.
-- **run_id:** a UUID per ingest run, stored in the chunk payload. Enables
-  upsert-before-delete on re-indexing: old chunks with a different run_id are deleted.
-- **Service path:** invocation via `titan.service` with a pre-loaded model (singleton).
-  No per-request GPU lock needed, since the service acquires the lock at startup.
-- **CLI path:** direct invocation (`python -m titan.search`). Loads BGE-M3 itself, acquires the GPU lock.
-- **VAULT_ROOT:** base directory of the Obsidian vault. All service paths must live
-  under it (path-traversal protection). Default: `/mnt/f/vault` (example; on native
-  Linux e.g. `~/vault`).
+## Glossar
+- **Late Chunking:** eine Chunking-Strategie, die zuerst den vollständigen Dokumentkontext
+  einbettet und dann chunkt (statt umgekehrt). Erhält den semantischen Kontext über
+  Chunk-Grenzen hinweg.
+- **BGE-M3:** Embedding-Modell mit drei Vektoren pro Chunk (dense, sparse, colbert).
+- **RRF (Reciprocal Rank Fusion):** führt mehrere gerankte Listen (dense/sparse/colbert)
+  zu einem konsolidierten Ranking zusammen. k=60 ist der Default-Parameter.
+- **Epic 5A:** Contextual Retrieval via Phi-4-Zusammenfassungen — in v1.0 verworfen, nicht portiert.
+- **Epic 5B:** semantisches Caching von Query-Ergebnissen in einer separaten Qdrant-Collection.
+- **Domain:** ein Klassifikations-Label pro Dokument (z. B. `lernen`, `trading`, `titan`).
+  Ermöglicht isolierte Suche pro Wissensbereich.
+- **run_id:** eine UUID pro Ingest-Lauf, im Chunk-Payload gespeichert. Ermöglicht
+  upsert-before-delete bei Neuindexierung: alte Chunks mit abweichender run_id werden gelöscht.
+- **Service-Pfad:** Aufruf über `titan.service` mit vorgeladenem Modell (Singleton).
+  Kein GPU-Lock pro Request nötig, da der Service das Lock beim Start erwirbt.
+- **CLI-Pfad:** direkter Aufruf (`python -m titan.search`). Lädt BGE-M3 selbst, erwirbt das GPU-Lock.
+- **VAULT_ROOT:** Basisverzeichnis des Obsidian-Vaults. Alle Service-Pfade müssen darunter
+  liegen (Schutz vor Path-Traversal). Default: `/mnt/f/vault` (Beispiel; auf nativem Linux
+  z. B. `~/vault`).

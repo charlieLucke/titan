@@ -1,191 +1,191 @@
-# Decisions Log
+# Entscheidungs-Log
 
-> Architecture Decision Records. Append-only. One entry per significant decision.
-> This prevents re-litigating the same questions in every new AI session.
+> Architecture Decision Records. Nur anhängen. Ein Eintrag pro signifikanter Entscheidung.
+> Das verhindert, dieselben Fragen in jeder neuen KI-Sitzung neu auszufechten.
 
 ## Format
 
 ```
-## YYYY-MM-DD: Short title
-**Decision:** What we decided
-**Reasoning:** Why
-**Alternatives considered:** What we rejected and why
-**Consequences:** What this implies going forward
+## JJJJ-MM-TT: Kurztitel
+**Entscheidung:** Was wir entschieden haben
+**Begründung:** Warum
+**Erwogene Alternativen:** Was wir verworfen haben und warum
+**Konsequenzen:** Was das für die Zukunft bedeutet
 ```
 
 ---
 
-## Initial decisions (template defaults)
+## Anfangsentscheidungen (Template-Defaults)
 
-## 2026-XX-XX: Use uv as package manager
-**Decision:** uv (over pip+venv, poetry, pdm).
-**Reasoning:** 10-100x faster than pip; unified tool replacing pip, pip-tools, virtualenv, pyenv; lockfile by default; backed by Astral (same team as ruff).
-**Alternatives considered:** Poetry (slower, more config overhead, separate from venv tooling). pip+venv (no lockfile by default, manual workflow).
-**Consequences:** All dependency operations go through `uv add` / `uv remove` / `uv sync`. Never edit pyproject.toml dependencies manually.
+## 2026-XX-XX: uv als Paketmanager verwenden
+**Entscheidung:** uv (statt pip+venv, poetry, pdm).
+**Begründung:** 10–100× schneller als pip; vereintes Werkzeug, das pip, pip-tools, virtualenv, pyenv ersetzt; Lockfile standardmäßig; getragen von Astral (dasselbe Team wie ruff).
+**Erwogene Alternativen:** Poetry (langsamer, mehr Konfigurationsaufwand, getrennt vom venv-Tooling). pip+venv (kein Lockfile by default, manueller Workflow).
+**Konsequenzen:** Alle Dependency-Operationen laufen über `uv add` / `uv remove` / `uv sync`. Niemals pyproject.toml-Abhängigkeiten manuell bearbeiten.
 
-## 2026-XX-XX: Use ruff for lint and format
-**Decision:** ruff replaces black + flake8 + isort + pyupgrade.
-**Reasoning:** Single tool, much faster, consistent config, actively maintained.
-**Consequences:** Don't add black, flake8, or isort as separate tools.
+## 2026-XX-XX: ruff für Lint und Format verwenden
+**Entscheidung:** ruff ersetzt black + flake8 + isort + pyupgrade.
+**Begründung:** Einzelwerkzeug, deutlich schneller, konsistente Konfiguration, aktiv gepflegt.
+**Konsequenzen:** black, flake8 oder isort nicht als separate Werkzeuge ergänzen.
 
-## 2026-XX-XX: Mypy strict mode
-**Decision:** Mypy in strict mode from day one.
-**Reasoning:** Strictness is much easier to enforce from the start than retrofit. Catches whole categories of bugs at write-time.
-**Consequences:** Every function needs full type hints. `# type: ignore` requires an inline comment explaining why.
+## 2026-XX-XX: Mypy Strict Mode
+**Entscheidung:** Mypy im Strict Mode ab Tag eins.
+**Begründung:** Striktheit ist von Anfang an viel leichter durchzusetzen als nachzurüsten. Fängt ganze Bug-Kategorien zur Schreibzeit ab.
+**Konsequenzen:** Jede Funktion braucht vollständige Type-Hints. `# type: ignore` erfordert einen Inline-Kommentar mit Begründung.
 
 ---
 
-## 2026-05-12: Big-bang migration from RAG_System, Epic 5A v1.0 not ported
-**Decision:** Code from `~/projects/RAG_System/execution/` is ported 1:1 into `src/titan/`.
-Epic 5A (Contextual Retrieval via Phi-4 summaries) is deliberately removed during the port.
-**Reasoning:** Epic 5A v1.0 had too high latency and too little retrieval gain for the effort.
-The reimplementation (Epic 5A v2.0) should start cleanly on the new code base, not on old code.
-**Alternatives considered:** A selective port with a feature flag for 5A — rejected, since a dead
-feature in the code causes confusion and complicates mypy hygiene.
-**Consequences:** `~/projects/RAG_System/` stays unchanged as a reference. Whoever needs 5A code
-reads it there. All `--contextual`, `--clear-summary-cache`, `--summary-cache-stats` flags are dropped.
+## 2026-05-12: Big-Bang-Migration von RAG_System, Epic 5A v1.0 nicht portiert
+**Entscheidung:** Code aus `~/projects/RAG_System/execution/` wird 1:1 nach `src/titan/` portiert.
+Epic 5A (Contextual Retrieval via Phi-4-Zusammenfassungen) wird beim Port bewusst entfernt.
+**Begründung:** Epic 5A v1.0 hatte zu hohe Latenz und zu geringen Retrieval-Gewinn für den Aufwand.
+Die Reimplementierung (Epic 5A v2.0) soll sauber auf der neuen Codebasis starten, nicht auf altem Code.
+**Erwogene Alternativen:** Ein selektiver Port mit Feature-Flag für 5A — verworfen, da ein totes
+Feature im Code Verwirrung stiftet und die mypy-Hygiene erschwert.
+**Konsequenzen:** `~/projects/RAG_System/` bleibt unverändert als Referenz. Wer 5A-Code braucht,
+liest ihn dort. Alle Flags `--contextual`, `--clear-summary-cache`, `--summary-cache-stats` entfallen.
 
-## 2026-05-12: Flat package structure under src/titan/
-**Decision:** Flat structure: `src/titan/utils.py`, `src/titan/ingest.py` etc. instead of
-`src/titan/rag_system/execution/utils.py` (the old layout).
-**Reasoning:** The old `rag_system/execution/` prefix was a workaround without a package namespace.
-With `titan` as the package name, the extra nesting is pure overhead.
-**Consequences:** Import paths read `from titan.utils import ...` — short and unambiguous.
+## 2026-05-12: Flache Paketstruktur unter src/titan/
+**Entscheidung:** Flache Struktur: `src/titan/utils.py`, `src/titan/ingest.py` usw. statt
+`src/titan/rag_system/execution/utils.py` (das alte Layout).
+**Begründung:** Der alte Präfix `rag_system/execution/` war ein Workaround ohne Paket-Namespace.
+Mit `titan` als Paketname ist die zusätzliche Verschachtelung reiner Overhead.
+**Konsequenzen:** Import-Pfade lauten `from titan.utils import ...` — kurz und eindeutig.
 
-## 2026-05-12: mypy ignore_missing_imports for ML libraries
-**Decision:** `ignore_missing_imports = true` in `[[tool.mypy.overrides]]` for `flagembedding`,
-`docling`, and possibly `torch` (depending on stub availability).
-**Reasoning:** These libraries have no type stubs. mypy strict would otherwise fail on every import.
-That's not a real type problem, just missing third-party stubs.
-**Consequences:** These modules are exempt from type checking — an acceptable compromise as long as
-no community stubs are available.
+## 2026-05-12: mypy ignore_missing_imports für ML-Bibliotheken
+**Entscheidung:** `ignore_missing_imports = true` in `[[tool.mypy.overrides]]` für `flagembedding`,
+`docling` und ggf. `torch` (je nach Stub-Verfügbarkeit).
+**Begründung:** Diese Bibliotheken haben keine Type-Stubs. mypy strict würde sonst bei jedem Import scheitern.
+Das ist kein echtes Typproblem, nur fehlende Drittanbieter-Stubs.
+**Konsequenzen:** Diese Module sind von der Typprüfung ausgenommen — ein akzeptabler Kompromiss, solange
+keine Community-Stubs verfügbar sind.
 
-## 2026-05-12: ColBERT vector dimension 1024 (FlagEmbedding ≥ 1.3)
-**Decision:** The Qdrant collection is created with `colbert.size=1024`.
-**Reasoning:** FlagEmbedding changed the ColBERT output dimension from 128 to 1024 as of version 1.3.
-The collection must match the installed library version exactly — a wrong value leads to upsert
-errors or unusable retrieval results without an obvious error message.
-**Alternatives considered:** 128 (previous version) — rejected, since it is effectively wrong from FE 1.3 on.
-**Consequences:** `flagembedding>=1.3` is an implicit minimum requirement (pyproject.toml declares
-`>=1.4.0`). On a FlagEmbedding upgrade: check the release notes for ColBERT dim changes. On a
-downgrade below 1.3: recreate the collection with `init_col.py --recreate` using `colbert.size=128`.
+## 2026-05-12: ColBERT-Vektordimension 1024 (FlagEmbedding ≥ 1.3)
+**Entscheidung:** Die Qdrant-Collection wird mit `colbert.size=1024` angelegt.
+**Begründung:** FlagEmbedding änderte die ColBERT-Ausgabedimension ab Version 1.3 von 128 auf 1024.
+Die Collection muss exakt zur installierten Bibliotheksversion passen — ein falscher Wert führt zu Upsert-
+Fehlern oder unbrauchbaren Retrieval-Ergebnissen ohne offensichtliche Fehlermeldung.
+**Erwogene Alternativen:** 128 (Vorgängerversion) — verworfen, da ab FE 1.3 effektiv falsch.
+**Konsequenzen:** `flagembedding>=1.3` ist eine implizite Mindestanforderung (pyproject.toml deklariert
+`>=1.4.0`). Bei einem FlagEmbedding-Upgrade: die Release Notes auf ColBERT-Dim-Änderungen prüfen. Bei einem
+Downgrade unter 1.3: die Collection mit `init_col.py --recreate` und `colbert.size=128` neu anlegen.
 
-## 2026-05-12: GPU_LOCK_PATH default changed to /tmp/bge_m3.lock
-**Decision:** The GPU lock file lives at `/tmp/bge_m3.lock` (was `/tmp/rag_gpu.lock` in the old
-RAG_System repo).
-**Reasoning:** The new lock path reflects the new package name and avoids collisions with still-running
-processes from the old RAG_System setup.
-**Consequences:** Whoever migrates from the old RAG_System: run `rm -f /tmp/rag_gpu.lock` once so a
-stale lock file doesn't block a process start. The new path can be overridden via `.env`
+## 2026-05-12: GPU_LOCK_PATH-Default geändert auf /tmp/bge_m3.lock
+**Entscheidung:** Die GPU-Lock-Datei liegt unter `/tmp/bge_m3.lock` (war `/tmp/rag_gpu.lock` im alten
+RAG_System-Repo).
+**Begründung:** Der neue Lock-Pfad spiegelt den neuen Paketnamen wider und vermeidet Kollisionen mit noch laufenden
+Prozessen aus dem alten RAG_System-Setup.
+**Konsequenzen:** Wer vom alten RAG_System migriert: einmal `rm -f /tmp/rag_gpu.lock` ausführen, damit eine
+veraltete Lock-Datei keinen Prozessstart blockiert. Der neue Pfad ist via `.env` überschreibbar
 (`GPU_LOCK_PATH=/tmp/bge_m3.lock`).
 
 ---
 
-## 2026-05-12: run_id payload convention for upsert-before-delete
-**Decision:** Every ingest run sets a UUID (`run_id`) in the chunk payload.
-On re-ingest: insert new chunks with a new `run_id`, then delete old chunks with a
-different `run_id` for the same `source_path`.
-**Reasoning:** Prevents a downtime window: as long as step 2 (upsert) is running, the old chunks are
-still searchable. If step 2 crashes, the old state is preserved. Duplicate chunks (old + new run) are
-harmless — RRF weights them equally and the next run cleans up.
-**Alternatives considered:** Delete-before-insert (leads to gaps during re-indexing).
-**Consequences:** `run_id` is a mandatory payload field for all ingest calls via the service.
-CLI ingest (`python -m titan.ingest`) doesn't use this convention yet — that's acceptable since the
-CLI path is typically used for the first ingest.
+## 2026-05-12: run_id-Payload-Konvention für upsert-before-delete
+**Entscheidung:** Jeder Ingest-Lauf setzt eine UUID (`run_id`) im Chunk-Payload.
+Beim Re-Ingest: neue Chunks mit neuer `run_id` einfügen, dann alte Chunks mit
+abweichender `run_id` für denselben `source_path` löschen.
+**Begründung:** Verhindert ein Downtime-Fenster: solange Schritt 2 (Upsert) läuft, sind die alten Chunks
+weiterhin durchsuchbar. Stürzt Schritt 2 ab, bleibt der alte Zustand erhalten. Duplikat-Chunks (alter + neuer Lauf) sind
+harmlos — RRF gewichtet sie gleich, und der nächste Lauf räumt auf.
+**Erwogene Alternativen:** Delete-before-insert (führt zu Lücken während der Neuindexierung).
+**Konsequenzen:** `run_id` ist ein Pflicht-Payload-Feld für alle Ingest-Aufrufe über den Service.
+CLI-Ingest (`python -m titan.ingest`) nutzt diese Konvention noch nicht — das ist akzeptabel, da der
+CLI-Pfad typischerweise für den ersten Ingest genutzt wird.
 
-## 2026-05-12: indexed:false semantics — the service decides, the client trusts
-**Decision:** The frontmatter field `indexed: false` is evaluated exclusively by the service.
-The watcher (brain-mcp Phase 2) sends the path without evaluating frontmatter.
-**Reasoning:** A single place that knows the semantics → no sync problem when the semantics change.
-**Consequences:** `POST /ingest/file` with `indexed:false`: deletes existing chunks, returns
-`skipped_reason: "indexed:false"`, creates no new chunks.
+## 2026-05-12: indexed:false-Semantik — der Service entscheidet, der Client vertraut
+**Entscheidung:** Das Frontmatter-Feld `indexed: false` wird ausschließlich vom Service ausgewertet.
+Der Watcher (brain-mcp Phase 2) sendet den Pfad, ohne Frontmatter auszuwerten.
+**Begründung:** Eine einzige Stelle, die die Semantik kennt → kein Sync-Problem, wenn sich die Semantik ändert.
+**Konsequenzen:** `POST /ingest/file` mit `indexed:false`: löscht bestehende Chunks, gibt
+`skipped_reason: "indexed:false"` zurück, legt keine neuen Chunks an.
 
-## 2026-05-12: Aggressive cache invalidation (domain-granular)
-**Decision:** On re-ingest of a note, ALL cache entries of its domain are cleared.
-**Reasoning:** The simplest correct implementation. Avoids a cache hit for the "old" state without
-chunk→cache dependency tracking.
-**Alternatives considered:** Fine-grained invalidation only for entries that contained the changed
-note — needs cache→chunk tracking that Epic 5B doesn't implement.
-**Consequences:** With frequent edits in one domain the cache hit rate can drop. If that becomes
-measurably problematic: add finer tracking.
+## 2026-05-12: Aggressive Cache-Invalidierung (domain-granular)
+**Entscheidung:** Beim Re-Ingest einer Notiz werden ALLE Cache-Einträge ihrer Domain gelöscht.
+**Begründung:** Die einfachste korrekte Implementierung. Vermeidet einen Cache-Hit auf den „alten" Zustand ohne
+Chunk→Cache-Dependency-Tracking.
+**Erwogene Alternativen:** Feingranulare Invalidierung nur für Einträge, die die geänderte
+Notiz enthielten — braucht Cache→Chunk-Tracking, das Epic 5B nicht implementiert.
+**Konsequenzen:** Bei häufigen Edits in einer Domain kann die Cache-Hit-Rate sinken. Wird das messbar
+problematisch: feineres Tracking ergänzen.
 
-## 2026-05-13: Cache invalidation in titan.search, not in routes
+## 2026-05-13: Cache-Invalidierung in titan.search, nicht in routes
 
-**Decision:** `invalidate_domain_cache(qdrant_client, domain)` lives in `titan.search`, not in
+**Entscheidung:** `invalidate_domain_cache(qdrant_client, domain)` lebt in `titan.search`, nicht in
 `titan.service.routes`.
-**Reasoning:** Audit T-MED-2: the function only needs `qdrant_client` and the global cache constants
-(`CACHE_COLLECTION_NAME`, `CACHE_ENABLED`) — both accessible from `search.py`. In `routes` it had
-ended up there because of `state.qdrant_client`, but that's not a valid argument: `search()` also takes
-the client as a parameter. This makes the function testable without FastAPI.
-**Consequences:** Routes import `invalidate_domain_cache` from `titan.search`.
+**Begründung:** Audit T-MED-2: die Funktion braucht nur `qdrant_client` und die globalen Cache-Konstanten
+(`CACHE_COLLECTION_NAME`, `CACHE_ENABLED`) — beide aus `search.py` erreichbar. In `routes` war sie
+wegen `state.qdrant_client` gelandet, aber das ist kein gültiges Argument: `search()` nimmt
+den Client ebenfalls als Parameter. So wird die Funktion ohne FastAPI testbar.
+**Konsequenzen:** Routes importieren `invalidate_domain_cache` aus `titan.search`.
 
-## 2026-05-13: The service binds only to 127.0.0.1 (no remote access)
+## 2026-05-13: Der Service bindet nur an 127.0.0.1 (kein Remote-Zugriff)
 
-**Decision:** uvicorn runs on `host="127.0.0.1"`, with no external configurability.
-**Reasoning:** The service is designed for single-user operation on the local machine. Exposing it on
-public IPs would require auth, rate limiting and TLS.
-Audit assessment (security table): ✅ acceptable hardening level for a single-user setup.
-**Consequences:** Whoever needs multi-user or remote: put a reverse proxy with auth in front, then
-review `VAULT_ROOT` and all path checks.
+**Entscheidung:** uvicorn läuft auf `host="127.0.0.1"`, ohne externe Konfigurierbarkeit.
+**Begründung:** Der Service ist für Single-User-Betrieb auf der lokalen Maschine ausgelegt. Eine Exposition auf
+öffentlichen IPs würde Auth, Rate-Limiting und TLS erfordern.
+Audit-Bewertung (Security-Tabelle): ✅ akzeptables Härtungsniveau für ein Single-User-Setup.
+**Konsequenzen:** Wer Mehrbenutzerbetrieb oder Remote braucht: einen Reverse-Proxy mit Auth davorsetzen, dann
+`VAULT_ROOT` und alle Pfadprüfungen überprüfen.
 
-## 2026-05-12: source_path + source as payload aliases
-**Decision:** New ingest uploads via the service set both `source_path` and `source` in the Qdrant
-payload. Old CLI ingests have only `source`.
-**Reasoning:** Backward compatibility: existing chunks in the index stay usable. The service schema
-(`Chunk.source_path`) is the new standard.
-**Consequences:** Search results return both keys. The routes code uses `source_path`; if empty, the
-note was ingested via the old CLI path.
+## 2026-05-12: source_path + source als Payload-Aliase
+**Entscheidung:** Neue Ingest-Uploads über den Service setzen sowohl `source_path` als auch `source` im Qdrant-
+Payload. Alte CLI-Ingests haben nur `source`.
+**Begründung:** Abwärtskompatibilität: bestehende Chunks im Index bleiben nutzbar. Das Service-Schema
+(`Chunk.source_path`) ist der neue Standard.
+**Konsequenzen:** Suchergebnisse liefern beide Schlüssel zurück. Der Routes-Code nutzt `source_path`; ist er leer, wurde
+die Notiz über den alten CLI-Pfad ingestet.
 
-## 2026-05-16: Setup assumption — WSL2 mirrored networking & Docker Desktop
-**Decision:** The setup assumes that Docker Desktop (for containers) is running, WSL2 mirrored
-networking is active, and `QDRANT_HOST=localhost` is configured.
-**Reasoning:** Undocumented network setups inevitably lead to lengthy debugging of the Qdrant
-connection over time. Since Titan accesses the Qdrant container via `localhost`, mirrored networking
-must be enabled in WSL2 for the port mapping to work.
-**Consequences:** On a `ConnectError` to Qdrant always check first: is Docker Desktop running? Is
-mirrored networking active in `.wslconfig`?
+## 2026-05-16: Setup-Annahme — WSL2 Mirrored Networking & Docker Desktop
+**Entscheidung:** Das Setup setzt voraus, dass Docker Desktop (für Container) läuft, WSL2 Mirrored
+Networking aktiv ist und `QDRANT_HOST=localhost` konfiguriert ist.
+**Begründung:** Undokumentierte Netzwerk-Setups führen über die Zeit zwangsläufig zu langwierigem Debugging der Qdrant-
+Verbindung. Da Titan den Qdrant-Container über `localhost` anspricht, muss Mirrored Networking
+in WSL2 aktiviert sein, damit das Port-Mapping funktioniert.
+**Konsequenzen:** Bei einem `ConnectError` zu Qdrant immer zuerst prüfen: läuft Docker Desktop? Ist
+Mirrored Networking in `.wslconfig` aktiv?
 
-## 2026-05-17: GET /notes — list all indexed notes
+## 2026-05-17: GET /notes — alle indexierten Notizen auflisten
 
-**Decision:** A new endpoint `GET /notes` lists all indexed notes, grouped by `source_path`, with
-domain and chunk count. It scrolls the entire collection (pagination of 256) and aggregates in-memory.
-**Reasoning:** brain-mcp needs an overview of all indexed files for its new `list_notes` tool.
-`GET /domains` only returns domain counts, not individual notes. A full scroll is uncritical for a
-personal vault (a few hundred/thousand chunks).
-**Consequences:** New schemas `NoteInfo` / `NotesResponse`. For very large collections a cached counter
-(like `domain_counts`) would be more efficient — add it if needed.
+**Entscheidung:** Ein neuer Endpunkt `GET /notes` listet alle indexierten Notizen auf, gruppiert nach `source_path`, mit
+Domain und Chunk-Anzahl. Er scrollt die gesamte Collection (Pagination zu 256) und aggregiert in-memory.
+**Begründung:** brain-mcp braucht einen Überblick über alle indexierten Dateien für sein neues `list_notes`-Tool.
+`GET /domains` liefert nur Domain-Zähler, nicht einzelne Notizen. Ein vollständiger Scroll ist für einen
+persönlichen Vault unkritisch (ein paar hundert/tausend Chunks).
+**Konsequenzen:** Neue Schemas `NoteInfo` / `NotesResponse`. Für sehr große Collections wäre ein gecachter Zähler
+(wie `domain_counts`) effizienter — bei Bedarf ergänzen.
 
-## 2026-05-17: Integration tests repaired (version drift + test isolation)
+## 2026-05-17: Integrationstests repariert (Versions-Drift + Test-Isolation)
 
-**Decision:** `tests/integration/test_service.py` brought up to the current state.
-**Reasoning:** The integration suite was completely red and no longer runnable — four overlapping defects:
-1. `VectorsConfig(root=...)` — in qdrant-client 1.18 `VectorsConfig` is a `typing.Union` alias, not
-   instantiable. Fix: pass `vectors_config` directly as a dict (like the production code in
+**Entscheidung:** `tests/integration/test_service.py` auf den aktuellen Stand gebracht.
+**Begründung:** Die Integrations-Suite war komplett rot und nicht mehr lauffähig — vier überlappende Defekte:
+1. `VectorsConfig(root=...)` — in qdrant-client 1.18 ist `VectorsConfig` ein `typing.Union`-Alias, nicht
+   instanziierbar. Fix: `vectors_config` direkt als Dict übergeben (wie der Produktivcode in
    `init_col.py`).
-2. Qdrant now requires an API key — the `qdrant_client` fixture didn't pass one. Fix: `load_dotenv()`
+2. Qdrant verlangt jetzt einen API-Key — die `qdrant_client`-Fixture gab keinen mit. Fix: `load_dotenv()`
    + `api_key=os.getenv("QDRANT_API_KEY")`.
-3. `TestClient(app)` as a context manager ran the `lifespan`, which reloads BGE-M3 and Qdrant and
-   overwrote the pre-injected test state. Fix: without `with`.
-4. `test_health_degraded_without_qdrant` mutated the `state` singleton without restoring it — all
-   subsequent tests saw `None` (503). Fix: save/restore.
-**Consequences:** The suite runs again (19/20 green). An occasional grpc error on the collection
-teardown of the last test remains — separate teardown robustness, open. Integration tests must run
-with `titan-service` stopped (BGE-M3 GPU lock).
+3. `TestClient(app)` als Context-Manager führte den `lifespan` aus, der BGE-M3 und Qdrant neu lädt und
+   den vorinjizierten Test-State überschrieb. Fix: ohne `with`.
+4. `test_health_degraded_without_qdrant` mutierte das `state`-Singleton, ohne es wiederherzustellen — alle
+   folgenden Tests sahen `None` (503). Fix: Save/Restore.
+**Konsequenzen:** Die Suite läuft wieder (19/20 grün). Ein gelegentlicher grpc-Fehler beim Collection-
+Teardown des letzten Tests bleibt — separate Teardown-Robustheit, offen. Integrationstests müssen bei
+gestopptem `titan-service` laufen (BGE-M3 GPU-Lock).
 
-## 2026-09-05: Serve the two vault reports over HTTP
-**Decision:** `GET /reports/graph_check` and `GET /reports/offene_punkte` next to the
-existing endpoints, returning what `titan.tools.graph_check` and
-`titan.tools.offene_punkte` already compute. `_sortiert` became `sortiert`: it is
-called from outside its module now, so the underscore was wrong.
-**Reasoning:** `plan-zentrales-dashboard` Phase 4b wants these two as reports in a
-browser rather than as remembered commands. They were assumed to live in brain-mcp;
-they are here, and titan already serves HTTP — so this is two thin routes rather than a
-new transport, a new token and a new client somewhere else.
-**Consequences:** `graph_check_report` reads the repository directly instead of calling
-`graph_check.sammle`, which fetches `GET /notes` over HTTP — inside the service that
-would be the process asking itself over the network. `offene_punkte_report` keeps
-reading the vault from disk rather than from the index, deliberately: an open point can
-sit in a note that is not indexed right now, and that is exactly the one that would
-otherwise fall out. Both are unauthenticated like the rest of titan's API, which binds
-loopback — if that ever changes, these expose vault content and need the same treatment
-as everything else.
+## 2026-09-05: Die zwei Vault-Berichte über HTTP ausliefern
+**Entscheidung:** `GET /reports/graph_check` und `GET /reports/offene_punkte` neben den
+bestehenden Endpunkten. Sie liefern das, was `titan.tools.graph_check` und
+`titan.tools.offene_punkte` ohnehin schon berechnen. Aus `_sortiert` wurde `sortiert`:
+die Funktion wird inzwischen von außerhalb ihres Moduls aufgerufen, der Unterstrich war
+also falsch.
+**Begründung:** Phase 4b von `plan-zentrales-dashboard` will die beiden als Bericht im
+Browser statt als Befehl, den sich jemand merken muss. Sie wurden in brain-mcp vermutet;
+sie liegen hier, und titan liefert bereits HTTP aus — also zwei dünne Routen statt eines
+neuen Transports, eines neuen Tokens und eines neuen Clients an anderer Stelle.
+**Konsequenzen:** `graph_check_report` liest das Repository direkt, statt
+`graph_check.sammle` aufzurufen, das `GET /notes` über HTTP holt — innerhalb des Dienstes
+wäre das der Prozess, der sich selbst über das Netz befragt. `offene_punkte_report` liest
+den Vault bewusst weiterhin von der Platte und nicht aus dem Index: ein offener Punkt kann
+in einer Notiz stehen, die gerade nicht indexiert ist, und genau die fiele sonst heraus.
+Beide sind unauthentifiziert wie der Rest von titans API, die auf Loopback bindet — ändert
+sich das je, geben sie Vault-Inhalt preis und brauchen dieselbe Behandlung wie alles andere.

@@ -1,148 +1,148 @@
-# Ideas
+# Ideen
 
-> Out-of-scope ideas captured during work, to revisit later.
-> Nothing here is committed. This is a parking lot.
+> Out-of-Scope-Ideen, die während der Arbeit festgehalten werden, um sie später wieder aufzugreifen.
+> Nichts hier ist verbindlich. Das ist ein Parkplatz.
 
 ## Format
-- [ ] **YYYY-MM-DD:** Idea description. Why it matters. Rough effort estimate.
+- [ ] **JJJJ-MM-TT:** Ideenbeschreibung. Warum sie wichtig ist. Grobe Aufwandsschätzung.
 
 ---
 
-## Pending
+## Ausstehend
 
 - [ ] **2026-06-15: docs/ai NICHT in die Haupt-Collection `mein_wissen` ingesten (Entscheidung/Guard).**
-      Verlockend, aber es verwaessert den Wissens-Index: docs/ai ist dichtes
-      Engineering-Geruest (CURRENT_TASK, HANDOFF, IDEAS-TODOs, plans mit
-      Implementierer-Prompts, CONTRACTS) — als Chunks taeuchten Plan-/Meta-Fragmente bei
+      Verlockend, aber es verwässert den Wissens-Index: docs/ai ist dichtes
+      Engineering-Gerüst (CURRENT_TASK, HANDOFF, IDEAS-TODOs, plans mit
+      Implementierer-Prompts, CONTRACTS) — als Chunks tauchten Plan-/Meta-Fragmente bei
       Wissensfragen als „Treffer" auf (dasselbe Problem wie die obsidian-IDEA „nur die
-      Summary indexieren"), es hat kein `domain:`-Frontmatter, aendert sich staendig
-      (Cache-Invalidierung, Staleness) und liegt ausserhalb von `VAULT_ROOT`. Fuer
-      „Projektstand/was-als-naechstes" ist ohnehin ein **direkter Datei-Read** das
-      richtige Pattern (authoritativ, aktuell), nicht semantisches top-k — siehe
-      workspace-mcp-IDEA `project_status` und die Chatbot-IDEA in brain-dashboard. Falls
+      Summary indexieren"), es hat kein `domain:`-Frontmatter, ändert sich ständig
+      (Cache-Invalidierung, Staleness) und liegt außerhalb von `VAULT_ROOT`. Für
+      „Projektstand/was-als-nächstes" ist ohnehin ein **direkter Datei-Read** das
+      richtige Muster (autoritativ, aktuell), nicht semantisches top-k — siehe
+      workspace-mcp-IDEA `project_status` und die Chatbot-IDEA in homebase. Falls
       docs/ai je *semantisch* durchsuchbar sein soll: **eigene Collection/Namespace**
       (vgl. die Multi-Collection-IDEA weiter unten), niemals `mein_wissen`.
-      *Effort: 0 (bewusst nichts tun) — bzw. Medium, falls separate Collection gewollt.*
+      *Aufwand: 0 (bewusst nichts tun) — bzw. mittel, falls separate Collection gewollt.*
 
-- [ ] **2026-06-14: Ingest 500 when a chunk's multi-vector exceeds Qdrant's 1 MiB per-point gRPC limit.**
-      BGE-M3 ColBERT emits one 1024-d vector per token, so a chunk of ~256+ tokens already
-      exceeds 1 048 576 bytes. `repository.upsert()` then raises
-      `grpc._channel._InactiveRpcError: INVALID_ARGUMENT ("Total size of all vectors (N) must
-      be less than 1048576")`, failing the **whole** batch → the note never indexes and
-      brain-watcher loops on it (5 retries, then the reconcile re-tries forever). Seen on a
-      large vault note (chunk #5 ≈ 1.94 MB). Fix options, cheapest first: (a) **graceful** —
-      upsert points individually / in sub-batches and skip-with-warning on an oversized point
-      instead of 500-ing the whole ingest (smallest, most robust; keeps the rest of the note
-      indexed); (b) **cap** the ColBERT token count / max chunk size so a single point stays
-      < 1 MiB; (c) raise Qdrant's gRPC max message size (server `service.*` + client
-      `grpc_options`) — only lifts the ceiling, doesn't bound it. Repro: ingest any note with a
-      dense ≥256-token chunk. Ref: `service/routes.py:338` → `service/repository.py:118`.
-      *Effort: Low (a) → Medium (b).*
+- [ ] **2026-06-14: Ingest-500, wenn der Multivektor eines Chunks Qdrants 1-MiB-Pro-Punkt-gRPC-Limit sprengt.**
+      BGE-M3-ColBERT erzeugt einen 1024-dim-Vektor pro Token, sodass schon ein ~256+-Token-Chunk
+      1 048 576 Bytes überschreitet. `repository.upsert()` wirft dann
+      `grpc._channel._InactiveRpcError: INVALID_ARGUMENT („Total size of all vectors (N) must be
+      less than 1048576")` und der **ganze** Batch scheitert → die Notiz wird nie indexiert und
+      brain-watcher loopt darauf (5 Retries, dann probiert es der Reconcile endlos erneut).
+      Beobachtet an einer großen Vault-Notiz (Chunk #5 ≈ 1,94 MB). Fix-Optionen, billigste zuerst:
+      (a) **graceful** — Punkte einzeln / in Sub-Batches upserten und einen zu großen Punkt
+      überspringen + warnen, statt den ganzen Ingest mit 500 zu killen (kleinste, robusteste
+      Lösung; der Rest der Notiz bleibt indexiert); (b) **kappen** — ColBERT-Tokenzahl / max-Chunk-
+      Größe begrenzen, sodass ein Punkt < 1 MiB bleibt; (c) Qdrants gRPC-max-message-size anheben
+      (Server `service.*` + Client `grpc_options`) — schiebt nur die Grenze. Repro: jede Notiz mit
+      einem dichten ≥256-Token-Chunk. Ref: `service/routes.py:338` → `service/repository.py:118`.
+      *Aufwand: Low (a) → Medium (b).*
       `QdrantRepository.aggregate_notes()` scrollt die gesamte Collection und aggregiert
       in Python — O(N) pro Aufruf. Bei heutiger Vault-Größe unkritisch; ab einigen
       zehntausend Chunks auf die Qdrant-Facet-API umstellen oder eine kleine
       Notes-Registry (SQLite) pflegen — Letzteres löst auch den domain_counts-Drift,
       wenn CLI-Ingests am Service vorbei laufen. Referenz:
       `~/projects/rag-workspace/docs/ai/plans/2026-06-12_architecture-review.md` (P2.4).
-      *Effort: Medium. Trigger: Vault-Wachstum, nicht Kalender.*
+      *Aufwand: Mittel. Auslöser: Vault-Wachstum, nicht Kalender.*
 
 - [ ] **2026-06-12: Property-based Tests für _split_text via hypothesis (Review P3.2).**
       `tests/titan/test_chunking.py` deckt die Overlap-Invarianten mit festen Beispielen
       ab; hypothesis würde sie generativ prüfen ("Sub-Chunks ohne Overlap ergeben den
       Originaltext", "kein Sub-Chunk > MAX_SUPER_CHUNK_CHARS") und Randfälle an
       Wortgrenzen/Separator-Fallbacks finden. Neue dev-Dependency `hypothesis`.
-      Referenz: Plan P3.2. *Effort: Low.*
+      Referenz: Plan P3.2. *Aufwand: Niedrig.*
 
 - [ ] **2026-06-12: Request-ID-Korrelation titan ↔ brain-mcp (Review P3.3).**
       X-Request-ID-Middleware in titan + Durchreichen im TitanClient, damit sich ein
       MCP-Call durch beide Journals verfolgen lässt. Erst sinnvoll, wenn Debugging über
-      Service-Grenzen hinweg real Zeit kostet. Referenz: Plan P3.3. *Effort: Medium.*
+      Service-Grenzen hinweg real Zeit kostet. Referenz: Plan P3.3. *Aufwand: Mittel.*
 
-- [x] **2026-06-06: Content-hash skip — short-circuit unchanged re-ingests.**
+- [x] **2026-06-06: Content-Hash-Skip — unveränderte Re-Ingests kurzschließen.**
       ✅ Umgesetzt 2026-06-12 (Commit f0602ce, Review-Session): `skipped_reason:
       "unchanged"`, `force=true` umgeht den Skip, `indexed: false` bleibt geehrt.
-      `ingest_file_endpoint` re-embeds the full file on every call, even when the raw
-      bytes are identical to what's already indexed. `content_hash` (sha256 of the raw
-      file) is already computed and stored in the payload but only used for reconcile —
-      not to skip work. Add an early-return at the top of the ingest path: cheaply read
-      the stored hash for that `source_path` (one `scroll`, `with_payload=["content_hash"]`,
-      `limit=1`), compare against the freshly computed hash, and return early (chunks
-      unchanged) if they match. Why it matters: the watcher re-fires on touch/metadata
-      events (Syncthing rename-delivery, editor saves that don't change content), and
-      each spurious trigger currently costs a full Docling→chunk→GPU-embed pass under
-      the GPU lock. Bonus: this finally gives the `force` flag a real meaning
-      (`force=True` bypasses the skip). Must still honour `indexed: false`. Effort: Low.
+      `ingest_file_endpoint` bettet bei jedem Aufruf die gesamte Datei neu ein, auch wenn die rohen
+      Bytes identisch zu dem bereits Indexierten sind. `content_hash` (sha256 der rohen
+      Datei) wird bereits berechnet und im Payload gespeichert, aber nur für den Reconcile genutzt —
+      nicht, um Arbeit zu sparen. Ein Early-Return am Anfang des Ingest-Pfads ergänzen: günstig
+      den gespeicherten Hash für diesen `source_path` lesen (ein `scroll`, `with_payload=["content_hash"]`,
+      `limit=1`), gegen den frisch berechneten Hash vergleichen und früh zurückkehren (Chunks
+      unverändert), wenn sie übereinstimmen. Warum es wichtig ist: der Watcher feuert bei Touch-/Metadaten-
+      Events erneut (Syncthing-Rename-Zustellung, Editor-Saves ohne Inhaltsänderung), und
+      jeder überflüssige Trigger kostet derzeit einen vollen Docling→Chunk→GPU-Embed-Durchlauf unter
+      dem GPU-Lock. Bonus: das gibt dem `force`-Flag endlich eine echte Bedeutung
+      (`force=True` umgeht den Skip). Muss weiterhin `indexed: false` ehren. Aufwand: Niedrig.
 
-- [ ] **2026-06-06: Near-duplicate suppression at retrieval time.** RRF already
-      dedups *exact* same-chunk hits across sub-queries (keyed on point ID), but there's
-      no suppression of *near*-duplicates — two different IDs whose text is almost
-      identical can both land in the top-k. The one real source of this in the current
-      pipeline is `_split_text`: sections over `MAX_SUPER_CHUNK_CHARS` (24k) are split
-      into sub-chunks with `OVERLAP_CHARS` (4k) of overlap, so adjacent sub-chunks share
-      text and can both rank when a query hits the overlap region. Cheapest fix first (do
-      NOT jump straight to MMR): a post-filter on the final result set that collapses
-      adjacent chunks of the same `source` with consecutive `chunk_id`, keeping the
-      higher-scored one (or merging their text). Only escalate to real diversity
-      reranking — MMR (maximal marginal relevance) or a cosine-similarity threshold on
-      the retrieved set — if the cheap post-filter proves insufficient. Why not now: at
-      ~14 notes with header-based chunking, chunks are mostly distinct sections and
-      near-dups are rare; this is complexity for a problem that barely exists yet.
-      Revisit only if duplicate-ish hits actually show up in results (most likely from
-      large, overlap-split documents). Effort: Low (post-filter) → Medium (MMR).
+- [ ] **2026-06-06: Near-Duplicate-Unterdrückung zur Retrieval-Zeit.** RRF
+      dedupliziert bereits *exakt* gleiche Chunk-Treffer über Sub-Queries (verankert an der Point-ID), aber es gibt
+      keine Unterdrückung von *Beinahe*-Duplikaten — zwei verschiedene IDs, deren Text fast
+      identisch ist, können beide in die Top-k gelangen. Die eine reale Quelle dafür in der aktuellen
+      Pipeline ist `_split_text`: Abschnitte über `MAX_SUPER_CHUNK_CHARS` (24k) werden
+      in Sub-Chunks mit `OVERLAP_CHARS` (4k) Overlap gesplittet, sodass benachbarte Sub-Chunks Text
+      teilen und beide ranken können, wenn eine Query die Overlap-Region trifft. Erst die günstigste Lösung (NICHT
+      direkt zu MMR springen): ein Post-Filter auf der finalen Ergebnismenge, der benachbarte
+      Chunks derselben `source` mit aufeinanderfolgender `chunk_id` zusammenfasst und den
+      höher gerankten behält (oder ihren Text verschmilzt). Erst zu echtem Diversity-
+      Reranking eskalieren — MMR (Maximal Marginal Relevance) oder einem Cosine-Similarity-Schwellwert auf
+      der abgerufenen Menge — wenn der günstige Post-Filter sich als unzureichend erweist. Warum nicht jetzt: bei
+      ~14 Notizen mit Header-basiertem Chunking sind Chunks meist eigenständige Abschnitte und
+      Near-Dups selten; das ist Komplexität für ein Problem, das es kaum gibt.
+      Erst wieder aufgreifen, wenn duplikatartige Treffer tatsächlich in Ergebnissen auftauchen (am ehesten aus
+      großen, overlap-gesplitteten Dokumenten). Aufwand: Niedrig (Post-Filter) → Mittel (MMR).
 
-- [ ] **2026-05-31: Wikilink-aware retrieval (link graph).** Parse `[[wikilinks]]`
-      from notes and use the vault's manual link structure to improve retrieval.
-      Manual links are high-quality human signal ("these belong together") that pure
-      vector search misses, and they enable structural/multi-hop questions
-      ("what depends on X?") and Map-of-Content hub notes. Staged, lowest-risk first:
-      1. **Cheap/now:** at ingest, store outbound wikilinks in the Qdrant payload
-         (`links: [...]`). Near-zero cost, future-proofs the data, no retrieval change.
-      2. **Later, behind a flag:** a `find_linked` tool (a note's neighbours) and an
-         optional, capped graph-expansion step in `search` (pull in linked neighbours
-         after the vector hit, carefully weighted so `top_k` isn't diluted).
-      3. **Full GraphRAG-style expansion** only once the vault grows to hundreds of
-         notes and MOC/hub-note habits exist.
-      Don't build now: at the current ~14 notes semantic search + `find_related`
-      already cover it, link resolution is fiddly (aliases, `#headings`, renames),
-      and it cuts against titan's lean single-user ethos. Effort: 1 (step 1) →
-      Medium/High (step 3).
+- [ ] **2026-05-31: Wikilink-bewusstes Retrieval (Link-Graph).** `[[wikilinks]]`
+      aus Notizen parsen und die manuelle Linkstruktur des Vaults zur Verbesserung des Retrievals nutzen.
+      Manuelle Links sind hochwertiges menschliches Signal ("die gehören zusammen"), das reine
+      Vektorsuche verpasst, und sie ermöglichen strukturelle/Multi-Hop-Fragen
+      ("was hängt von X ab?") und Map-of-Content-Hub-Notizen. Gestaffelt, risikoärmstes zuerst:
+      1. **Günstig/jetzt:** beim Ingest ausgehende Wikilinks im Qdrant-Payload speichern
+         (`links: [...]`). Nahezu nullkostig, macht die Daten zukunftssicher, keine Retrieval-Änderung.
+      2. **Später, hinter einem Flag:** ein `find_linked`-Tool (Nachbarn einer Notiz) und ein
+         optionaler, gedeckelter Graph-Expansionsschritt in `search` (verlinkte Nachbarn
+         nach dem Vektortreffer hereinziehen, sorgfältig gewichtet, damit `top_k` nicht verwässert).
+      3. **Vollständige GraphRAG-artige Expansion** erst, wenn der Vault auf Hunderte von
+         Notizen wächst und MOC-/Hub-Notiz-Gewohnheiten existieren.
+      Jetzt nicht bauen: bei den aktuellen ~14 Notizen decken Semantiksuche + `find_related`
+      das bereits ab, Link-Auflösung ist fummelig (Aliase, `#headings`, Renames),
+      und es widerspricht titans schlankem Single-User-Ethos. Aufwand: 1 (Schritt 1) →
+      Mittel/Hoch (Schritt 3).
 
-- [ ] **2026-05-31: Cross-encoder reranker as the final retrieval stage.** After RRF,
-      re-score the top-N candidates (e.g. 30) with a cross-encoder (e.g.
-      BGE-reranker-v2) and return the re-sorted `top_k`. Typically the single biggest
-      quality lever in a RAG pipeline — it judges query↔chunk relevance directly
-      instead of via independent embeddings. Runs on the workstation GPU. Cost: one
-      more model in VRAM + added latency per query (mind the GPU lock / VRAM budget).
-      Effort: Medium.
+- [ ] **2026-05-31: Cross-Encoder-Reranker als finale Retrieval-Stufe.** Nach RRF
+      die Top-N-Kandidaten (z. B. 30) mit einem Cross-Encoder neu bewerten (z. B.
+      BGE-reranker-v2) und die neu sortierten `top_k` zurückgeben. Typischerweise der größte einzelne
+      Qualitätshebel in einer RAG-Pipeline — er beurteilt Query↔Chunk-Relevanz direkt
+      statt über unabhängige Embeddings. Läuft auf der Workstation-GPU. Kosten: ein
+      weiteres Modell im VRAM + zusätzliche Latenz pro Query (GPU-Lock / VRAM-Budget beachten).
+      Aufwand: Mittel.
 
-- [ ] **2026-05-31: Contextual Retrieval (Epic 5A v2.0).** Have Phi-4 generate a 1–2
-      sentence context blurb per chunk and prepend it before embedding (Anthropic's
-      "Contextual Retrieval"). Recovers context lost at chunk boundaries → better
-      recall, especially for short/ambiguous chunks. Phi-4 is already in the stack.
-      The v1.0 attempt was dropped for poor cost/benefit, so the redo must be measured
-      against the eval harness (`ab_eval`) before keeping it. Cost: slower, more
-      expensive ingest. Effort: Medium–High.
+- [ ] **2026-05-31: Contextual Retrieval (Epic 5A v2.0).** Phi-4 einen 1–2-Satz-
+      Kontext-Blurb pro Chunk generieren lassen und ihn vor dem Embedding voranstellen (Anthropics
+      "Contextual Retrieval"). Stellt an Chunk-Grenzen verlorenen Kontext wieder her → besserer
+      Recall, besonders für kurze/mehrdeutige Chunks. Phi-4 ist bereits im Stack.
+      Der v1.0-Versuch wurde wegen schlechtem Kosten/Nutzen verworfen, daher muss die Neuauflage gegen
+      das Eval-Harness (`ab_eval`) gemessen werden, bevor man sie behält. Kosten: langsamerer, teurerer
+      Ingest. Aufwand: Mittel–Hoch.
 
-- [ ] **2026-05-31: Answer provenance / inline citations.** Make `generate` attribute
-      claims to the chunks/`source_path` that back them (e.g. inline `[n]` markers + a
-      sources list). Turns answers into verifiable, traceable output — high value for a
-      personal knowledge RAG. Effort: Low–Medium.
+- [ ] **2026-05-31: Antwort-Provenienz / Inline-Zitate.** `generate` so erweitern, dass es
+      Aussagen den Chunks/`source_path` zuordnet, die sie stützen (z. B. Inline-`[n]`-Marker + eine
+      Quellenliste). Macht Antworten zu verifizierbarem, nachvollziehbarem Output — hoher Wert für ein
+      persönliches Wissens-RAG. Aufwand: Niedrig–Mittel.
 
-- [ ] **2026-05-31: Qdrant snapshot backup/restore CLI.** A one-command snapshot (and
-      restore) of the collection. The index is derived but expensive to rebuild (full
-      re-embed); a snapshot is cheap insurance against corruption, a bad migration, or
-      a lost container volume. Effort: Low.
+- [ ] **2026-05-31: Qdrant-Snapshot-Backup/Restore-CLI.** Ein Ein-Befehl-Snapshot (und
+      -Restore) der Collection. Der Index ist abgeleitet, aber teuer neu aufzubauen (vollständiges
+      Re-Embedding); ein Snapshot ist günstige Versicherung gegen Korruption, eine fehlgeschlagene Migration oder
+      ein verlorenes Container-Volume. Aufwand: Niedrig.
 
-- [x] **2026-05-31: `/stats` endpoint + lightweight metrics.** ✅ Umgesetzt
-      (`GET /stats`): uptime, total chunks + domain count, cache hit rate, recent
-      search-latency p50/p95/max, cache entry count, last-ingest age. In-memory
-      counters in `ServiceState`, pure assembly in `service/stats.py`.
+- [x] **2026-05-31: `/stats`-Endpunkt + leichtgewichtige Metriken.** ✅ Umgesetzt
+      (`GET /stats`): Uptime, Chunks gesamt + Domain-Anzahl, Cache-Hit-Rate, jüngste
+      Such-Latenz p50/p95/max, Cache-Eintragsanzahl, Alter des letzten Ingests. In-Memory-
+      Counter in `ServiceState`, reine Zusammenstellung in `service/stats.py`.
 
-- [ ] **2026-05-31: Multi-collection / namespaces (the lean multi-user path).** A
-      `collection`/`namespace` request param so distinct contexts (e.g. personal vs.
-      work, or per project) get isolated search while sharing the one BGE-M3 model.
-      Gives ~80% of the practical benefit of multi-user (data separation) at ~10% of
-      the cost — no per-user auth, TLS, or GPU-concurrency rework, and it keeps the
-      single-user `127.0.0.1` design intact. True multi-tenant (multiple people,
-      isolated + authenticated) stays out of scope: front titan with a gateway then,
-      rather than baking tenancy into it. Effort: Medium.
+- [ ] **2026-05-31: Multi-Collection / Namespaces (der schlanke Mehrbenutzer-Pfad).** Ein
+      `collection`/`namespace`-Request-Parameter, sodass unterschiedliche Kontexte (z. B. privat vs.
+      Arbeit oder pro Projekt) isolierte Suche bekommen und sich dabei das eine BGE-M3-Modell teilen.
+      Liefert ~80 % des praktischen Nutzens von Mehrbenutzerbetrieb (Datentrennung) bei ~10 % der
+      Kosten — keine Per-User-Auth, kein TLS, kein GPU-Concurrency-Umbau, und es lässt das
+      Single-User-`127.0.0.1`-Design intakt. Echte Mandantenfähigkeit (mehrere Personen,
+      isoliert + authentifiziert) bleibt out of scope: titan dann mit einem Gateway davor versehen,
+      statt Mandantenfähigkeit hineinzubacken. Aufwand: Mittel.
