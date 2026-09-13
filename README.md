@@ -4,7 +4,7 @@
 Markdown-Notizen multi-vektoriell und beantwortet Fragen in natürlicher Sprache
 mit hybrider Suche + lokalem LLM — vollständig offline, ohne Cloud und ohne API-Keys.**
 
-titan ist die Such- und Retrieval-Engine eines kleinen, aus drei Diensten
+titan ist die Such- und Retrieval-Engine eines kleinen, aus vier Diensten
 bestehenden Wissenssystems (siehe [Teil eines größeren Systems](#teil-eines-größeren-systems)).
 
 ## Was ist RAG — und was hier besonders ist
@@ -94,17 +94,20 @@ python -m titan.search "Wie funktioniert Late Chunking?" --json | python -m tita
 
 ## Teil eines größeren Systems
 
-titan ist der **RAG-Kern**. Zwei Schwester-Repos hängen davor und dahinter:
+titan ist der **RAG-Kern**. Zwei Schwester-Repos hängen davor und dahinter, ein
+drittes steuert das Ganze:
 
 ```mermaid
 flowchart LR
     OIW["obsidian-inbox-watcher<br/>Dokumente → Notizen"]
     T["titan<br/>RAG-Engine (Index + Suche)"]
     BM["brain-mcp<br/>MCP-Server für Claude"]
+    HB["homebase<br/>Web-Control-Panel"]
     C(("Claude"))
     OIW -->|".md-Notizen"| T
-    BM -->|"HTTP: /search, /ingest"| T
+    BM -->|"HTTP: /search, /ingest/file"| T
     C <-->|"MCP-Tools"| BM
+    HB -.->|"Status · Start/Stopp · Logs"| T
     classDef here fill:#2b6cb0,stroke:#1a365d,color:#fff,stroke-width:2px;
     class T here
 ```
@@ -115,6 +118,8 @@ flowchart LR
 - **titan** *(du bist hier)* — indexiert die Notizen und beantwortet Suchanfragen.
 - **[brain-mcp](https://github.com/charlieLucke/brain-mcp)** — bindet titan als
   MCP-Server an Claude an (überwacht den Vault, stellt Such-Tools bereit).
+- **[homebase](https://github.com/charlieLucke/homebase)** — das Web-Control-Panel:
+  Status, Logs und Start/Stopp der Dienste. Steht daneben, nicht im Datenpfad.
 
 ## Stack
 
