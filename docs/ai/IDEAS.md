@@ -10,6 +10,25 @@
 
 ## Ausstehend
 
+- [ ] **2026-09-20: `chunk_markdown` teilt an `#`-Zeilen *innerhalb* von Code-Fences.**
+      `_HEADER_RE = re.compile(r"^(#{1,2}\s+.+)", re.MULTILINE)` (`ingest.py:230`)
+      kennt keinen Fence-Zustand, und `^` trifft mit MULTILINE jeden Zeilenanfang.
+      Ein Shell-Block, dessen Kommentarzeilen am Zeilenanfang stehen, eröffnet
+      deshalb je Zeile einen neuen Chunk. Gemessen am 20.09.2026 an der
+      Vault-Notiz `notes/projekte/lebenslauf-erzeuger.md`: ein einzelner
+      angehängter `##`-Abschnitt hob sie von 13 auf 16 Chunks, zwei davon
+      beginnen mitten im Codeblock — einer mit
+      `# Daten UND Ergebnis committen: ...` samt schließender Fence. Der
+      Suchtreffer ist dann ein Fragment ohne Anfang, dessen `header` ein
+      Shell-Kommentar ist; über `_compute_section_id` (`ingest.py:385f.`)
+      bekommt er zusätzlich eine eigene `section_id`. Fix: den Text zeilenweise
+      mit einem Fence-Zustand durchlaufen (drei Backticks bzw. `~~~`) und nur
+      Treffer außerhalb eines offenen Fences als Schnittpunkt werten, statt
+      `finditer` über den Volltext. Fällt erst jetzt auf, weil der Vault
+      Kommentare sonst ans Zeilenende schreibt. Workaround bis dahin: die
+      Kommentarzeile einrücken — gegen `^` genügt ein Leerzeichen.
+      *Aufwand: Low.*
+
 - [ ] **2026-06-15: docs/ai NICHT in die Haupt-Collection `mein_wissen` ingesten (Entscheidung/Guard).**
       Verlockend, aber es verwässert den Wissens-Index: docs/ai ist dichtes
       Engineering-Gerüst (CURRENT_TASK, HANDOFF, IDEAS-TODOs, plans mit
