@@ -24,7 +24,7 @@ src/titan/
 ├── main.py              # Dispatcher: Service-Modus + Hilfe
 ├── utils.py             # GPU-Lock (fcntl), stable_uuid, cache_uuid, sanitize
 ├── ingest.py            # PDF-Parsing (Docling), Markdown-Reader (Frontmatter),
-│                        # Late Chunking, BGE-M3 Embedding, make_point, Qdrant-Upsert
+│                        # Chunking, BGE-M3 Embedding (einzeln oder Late), make_point, Qdrant-Upsert
 ├── search.py            # Query-Zerlegung (Phi-4), BGE-M3, hybride Suche (RRF),
 │                        # Epic-5B Semantic Cache; search() für den Service injizierbar
 ├── generate.py          # Phi-4 Antwortgenerierung (CLI/stdin + der /ask-Endpunkt)
@@ -95,14 +95,14 @@ Vektoren pro Chunk: `dense` (1024d COSINE), `sparse` (lexikalisch), `colbert` (1
 
 ### CLI-Ingest (PDF)
 ```
-PDF → Docling (parsen) → chunk_markdown() → late_chunk_embed(BGE-M3)
+PDF → Docling (parsen) → chunk_markdown() → embed_chunks(BGE-M3, einzeln mit Kopfzeile)
     → upsert_files_to_qdrant() → Qdrant (gleiches Payload-Schema wie Service: source_path, run_id, content_hash)
 ```
 
 ### Service-Ingest (Markdown, POST /ingest/file)
 ```
 .md-Datei → read_markdown() [Frontmatter parsen, sanitize, indexed-Check]
-          → late_chunk_and_embed(content, model=Singleton)
+          → chunk_and_embed(content, model=Singleton, source_path)
           → make_point() [mit run_id] → qdrant.upsert()
           → qdrant.delete(alte Chunks mit abweichender run_id)
           → cache_invalidate(domain)

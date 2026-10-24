@@ -6,7 +6,7 @@
 
 Titan ist ein lokales, hochperformantes RAG-System (Retrieval-Augmented Generation)
 auf einer einzigen Workstation. Es indexiert PDFs und Markdown-Dateien, zerlegt sie
-per Late Chunking in Chunks, bettet sie mit BGE-M3 ein (Multi-Vektor: dense +
+an Überschriften in Chunks, bettet jeden mit Kopfzeile (Titel › Abschnitt) einzeln mit BGE-M3 ein (Multi-Vektor: dense +
 sparse + colbert), speichert sie in Qdrant und beantwortet Anfragen mit Reciprocal
 Rank Fusion + Phi-4 als Generator. Auslegung: Single-Workstation-Deployment
 (kein Mehrbenutzerbetrieb, kein Cloud-Deployment).
@@ -31,7 +31,7 @@ src/titan/
 ├── main.py          # Dispatcher: python -m titan service | help
 ├── utils.py         # GPU-Lock, stable_uuid, cache_uuid, sanitize
 ├── ingest.py        # PDF-Parsing (Docling), Markdown-Reader (Frontmatter),
-│                    # Late Chunking, BGE-M3 Embedding, make_point, Qdrant-Upsert
+│                    # Chunking, BGE-M3 Embedding (einzeln oder Late), make_point, Qdrant-Upsert
 ├── search.py        # Query-Zerlegung (Phi-4), BGE-M3, RRF, Epic-5B-Cache
 │                    # search() mit injizierbarem Modell + qdrant_client
 ├── generate.py      # Phi-4 Antwortgenerierung aus Chunk-Kontext
@@ -113,6 +113,13 @@ Siehe `.env.example` für alle Variablen. Die wichtigsten:
 - `CACHE_ENABLED`, `CACHE_COLLECTION_NAME` — Epic-5B Semantic Cache
 
 ## Bekannte Fallstricke
+- **Nach einem Voll-Reingest optimiert Qdrant minutenlang** (HNSW über die ColBERT-
+  Multivektoren, 100 % CPU, Collection `yellow`). In dieser Zeit laufen Upserts großer
+  Notizen in den gRPC-Timeout und kommen als 500 zurück; die Notiz behält ihre alten
+  Chunks. Danach einzeln mit `force` nachziehen. Gesehen am 24.10.2026.
+- **`FlagEmbedding.FlagReranker` läuft mit der installierten transformers-Version nicht**
+  (`XLMRobertaTokenizer has no attribute prepare_for_model`). Wer einen Cross-Encoder
+  braucht, nimmt `AutoModelForSequenceClassification` direkt.
 - `torch` via `uv add` installiert standardmäßig das CPU-Wheel. Nach der Installation prüfen:
   `uv run python -c "import torch; print(torch.cuda.is_available())"` → muss `True` sein.
   Andernfalls den CUDA-Index in `pyproject.toml` via `[[tool.uv.index]]` ergänzen.
@@ -129,9 +136,12 @@ Siehe `.env.example` für alle Variablen. Die wichtigsten:
   Nach der Änderung: `wsl --shutdown` aus PowerShell.
 
 ## Glossar
-- **Late Chunking:** eine Chunking-Strategie, die zuerst den vollständigen Dokumentkontext
-  einbettet und dann chunkt (statt umgekehrt). Erhält den semantischen Kontext über
-  Chunk-Grenzen hinweg.
+- **Late Chunking:** zuerst den vollständigen Dokumentkontext einbetten, dann chunken.
+  **Seit 24.10.2026 aus** (`late_chunking: false`): Jeder Abschnitt trug den Kontext der
+  ganzen Notiz, die Suche fand das Thema, aber nicht die Stelle (38 % gegen 82 % unter
+  den ersten fünf). Siehe DECISIONS.md.
+- **Kopfzeile:** `Notiztitel › Abschnitt`, wird vor jeden Chunk gesetzt, bevor er
+  eingebettet wird (`ingest.mit_kopfzeile`). Gespeichert wird nur der Chunk-Text.
 - **BGE-M3:** Embedding-Modell mit drei Vektoren pro Chunk (dense, sparse, colbert).
 - **RRF (Reciprocal Rank Fusion):** führt mehrere gerankte Listen (dense/sparse/colbert)
   zu einem konsolidierten Ranking zusammen. k=60 ist der Default-Parameter.

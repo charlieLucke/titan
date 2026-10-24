@@ -6,7 +6,7 @@
 
 ## Dieses Repo
 - **Service-Name:** titan
-- **Rolle:** RAG-Engine — Ingest (Docling → Late Chunking → BGE-M3) + hybride Suche über Qdrant
+- **Rolle:** RAG-Engine — Ingest (Docling → Chunking → BGE-M3, je Chunk mit Kopfzeile) + hybride Suche über Qdrant
 - **Konsumiert:** —
 - **Stellt bereit:** contracts/titan.openapi.yaml
 - **Port (lokal):** 8765

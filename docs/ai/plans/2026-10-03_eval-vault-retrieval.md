@@ -1,6 +1,6 @@
 # Plan: Retrieval-Qualität am echten Vault messen
 
-Stand 2026-10-03. Status: **geplant, nicht umgesetzt.** Ein Kurztest mit 12
+Stand 2026-10-03. Status: **Baseline gemessen 2026-10-24** (196 Fälle, siehe DECISIONS.md), Hebel 1, 2, 5 und 6 gemessen, Late Chunking abgeschaltet (Stelle @5 0,38 → 0,81). Link-Graph und Zerlegung für „abhängigkeit“ gemessen und verworfen (DECISIONS.md). Offen: 40 Fragen von Charlie. Ein Kurztest mit 12
 Fragen ist gelaufen (Abschnitt 1). Dieser Plan beschreibt die ausführliche
 Messung, die Charlie haben will: viele Aufrufe, viele Daten, ein belastbares
 Ergebnis zu Treffsicherheit, Kontextmenge und der Frage, ob Graph und Vektor
