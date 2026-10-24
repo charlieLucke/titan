@@ -213,6 +213,20 @@ def search_endpoint(req: SearchRequest) -> SearchResponse:
             model=state.bge_model,
             qdrant_client=state.qdrant_client,
         )
+        if req.kompakt and result["chunks"]:
+            from titan.kompakt import kompaktiere
+
+            kurz = kompaktiere(
+                state.bge_model,
+                req.query,
+                [c.get("text", "") for c in result["chunks"]],
+                req.kompakt_zeichen,
+            )
+            # Kopien: die Chunks koennen aus dem Cache stammen und duerfen dort
+            # nicht gekuerzt landen.
+            result["chunks"] = [
+                {**c, "text": t} for c, t in zip(result["chunks"], kurz, strict=True)
+            ]
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
         # Observability: record for GET /stats (in-memory, best-effort).
