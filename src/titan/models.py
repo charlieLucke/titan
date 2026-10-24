@@ -16,7 +16,7 @@ from dataclasses import dataclass
 class Chunk:
     """Ein semantischer Abschnitt einer Quelldatei, optional mit Embeddings.
 
-    chunk_markdown() erzeugt Chunks ohne Vektoren; late_chunk_embed() befüllt
+    chunk_markdown() erzeugt Chunks ohne Vektoren; embed_chunks() befüllt
     dense/sparse/colbert in-place — die Vektorfelder sind deshalb Optionals.
     make_point() verlangt befüllte Vektoren und wirft sonst ValueError.
     """

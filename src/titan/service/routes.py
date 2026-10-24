@@ -213,6 +213,20 @@ def search_endpoint(req: SearchRequest) -> SearchResponse:
             model=state.bge_model,
             qdrant_client=state.qdrant_client,
         )
+        if req.kompakt and result["chunks"]:
+            from titan.kompakt import kompaktiere
+
+            kurz = kompaktiere(
+                state.bge_model,
+                req.query,
+                [c.get("text", "") for c in result["chunks"]],
+                req.kompakt_zeichen,
+            )
+            # Kopien: die Chunks koennen aus dem Cache stammen und duerfen dort
+            # nicht gekuerzt landen.
+            result["chunks"] = [
+                {**c, "text": t} for c, t in zip(result["chunks"], kurz, strict=True)
+            ]
         latency_ms = int((time.perf_counter() - t0) * 1000)
 
         # Observability: record for GET /stats (in-memory, best-effort).
@@ -440,12 +454,12 @@ def ingest_file_endpoint(req: IngestRequest) -> IngestResponse:
         from titan.ingest import (  # lazy imports
             CURATION_FIELDS,
             ChunkTooLargeError,
+            chunk_and_embed,
             extract_wikilinks,
-            late_chunk_and_embed,
             make_point,
         )
 
-        new_chunks = late_chunk_and_embed(content, model=state.bge_model)
+        new_chunks = chunk_and_embed(content, model=state.bge_model, source_path=file_path)
         links = extract_wikilinks(content)
 
         # Count BEFORE upsert so chunks_deleted reflects the true size of the previous version.

@@ -26,7 +26,7 @@ Rank Fusion zusammen — der entscheidende Qualitätshebel in einer RAG-Pipeline
 flowchart TB
     subgraph Ingest["Indexierung"]
         PDF["PDF / Markdown"] --> P["Parsen<br/>(Docling / Frontmatter)"]
-        P --> LC["Late Chunking"]
+        P --> LC["Chunking an Überschriften<br/>+ Kopfzeile"]
         LC --> EMB["BGE-M3 Embedding<br/>dense + sparse + ColBERT"]
         EMB --> Q[("Qdrant<br/>Vektor-DB")]
     end
@@ -45,8 +45,10 @@ flowchart TB
 - **BGE-M3 Multi-Vektor-Embeddings** — drei Vektoren pro Chunk (dense + sparse +
   ColBERT), statt nur einem. Deckt semantische, lexikalische und Token-genaue
   Treffer ab.
-- **Late Chunking** — bettet den *gesamten* Dokumentkontext ein, bevor in Chunks
-  zerlegt wird, und erhält so die Bedeutung über Chunk-Grenzen hinweg.
+- **Einzel-Embedding mit Kopfzeile** — jeder Abschnitt wird für sich eingebettet, mit
+  `Notiztitel › Abschnitt` davor. Late Chunking (ganzer Dokumentkontext vor dem Schnitt)
+  ist per `late_chunking` noch schaltbar, aber aus: gemessen an 165 Fragen fand es die
+  richtige Stelle unter den ersten fünf in 38 %, das Einzel-Embedding in 82 %.
 - **Hybrid Search mit Reciprocal Rank Fusion + ColBERT-MaxSim-Reranking** —
   drei Rankings werden zu einem konsolidierten Ergebnis zusammengeführt.
 - **Phi-4 via Ollama** — zerlegt komplexe Fragen und generiert Antworten,
@@ -198,7 +200,7 @@ uv run pytest tests/integration/ -m integration -v   # Integrationstests (benöt
 ```
 src/titan/
 ├── main.py            # Dispatcher: python -m titan service | help
-├── ingest.py          # Parsen → Late Chunking → BGE-M3 Embedding → Qdrant-Upsert
+├── ingest.py          # Parsen → Chunking → BGE-M3 Embedding → Qdrant-Upsert
 ├── search.py          # Query-Zerlegung, BGE-M3, RRF, Semantic Cache
 ├── generate.py        # Phi-4 Antwortgenerierung aus Chunk-Kontext
 ├── evaluate.py        # LLM-as-Judge-Evaluation

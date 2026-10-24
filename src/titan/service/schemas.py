@@ -31,6 +31,10 @@ class SearchRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50)
     use_decompose: bool = True
     use_cache: bool = True
+    # Treffer extraktiv auf die passenden Zeilen kuerzen (titan.kompakt). Additiv
+    # und aus per Default: ein Aufrufer, der es nicht kennt, sieht nichts Neues.
+    kompakt: bool = False
+    kompakt_zeichen: int = Field(default=600, ge=100, le=4000)
 
 
 class Chunk(BaseModel):

@@ -189,3 +189,108 @@ den Vault bewusst weiterhin von der Platte und nicht aus dem Index: ein offener 
 in einer Notiz stehen, die gerade nicht indexiert ist, und genau die fiele sonst heraus.
 Beide sind unauthentifiziert wie der Rest von titans API, die auf Loopback bindet — ändert
 sich das je, geben sie Vault-Inhalt preis und brauchen dieselbe Behandlung wie alles andere.
+
+## 2026-10-24: Vault-Eval mit 196 Fällen, und extraktive Kompression als Option von `/search`
+**Entscheidung:**
+1. Neues Werkzeug `titan.eval.vault_eval` statt Umbau von `ab_eval` (Abweichung vom Plan
+   `2026-10-03_eval-vault-retrieval.md`, Abschnitt 4). `ab_eval` lädt BGE-M3 selbst und
+   braucht dafür den GPU-Lock, misst also nie gegen den laufenden Dienst. Die neue Messung
+   geht über `POST /search` mit genau den Parametern des Connectors (ohne Zerlegung, ohne
+   Cache).
+2. Das Goldset liegt **im Vault** unter `.eval/goldset.jsonl`, nicht unter
+   `src/titan/eval/fixtures/` wie im Plan. Dieses Repo ist öffentlich, und jeder Fall trägt
+   ein wörtliches Zitat aus dem Vault. Versteckte Ordner indexiert der Watcher nicht.
+3. `SearchRequest` bekommt `kompakt` (Default aus) und `kompakt_zeichen` (Default 600).
+   `titan.kompakt` kürzt jeden Treffer auf die Zeilen, deren BGE-M3-Vektor der Frage am
+   nächsten ist. Nichts wird umformuliert, Lücken stehen als `[…]` da.
+**Begründung:** Gemessen am 24.10.2026 mit 196 Fällen (165 mit Sollstelle, 16 negativ,
+15 geschützt), Stellen-Recall = der Beleg steht wörtlich im Treffertext:
+
+| Variante | Stellen-Recall | Notiz-Recall | Tokens (Median) |
+|---|---|---|---|
+| top_k 10, voll | 0,50 | 0,79 | 4 336 |
+| top_k 5, voll (Connector-Default seit 24.10.) | 0,38 | 0,74 | 2 110 |
+| top_k 10, kompakt 800 | 0,47 | 0,79 | 2 335 |
+| top_k 5, kompakt 800 | 0,36 | 0,74 | 1 170 |
+| top_k 10, kompakt 400 | 0,38 | 0,79 | 1 411 |
+
+Zehn kompakte Treffer kosten so viel wie fünf volle und finden 9 Punkte mehr. Eine
+Zusammenfassung durch ein lokales Modell kam nicht in Frage: neuer Text kann falsch sein,
+ohne dass der Leser es merkt.
+**Konsequenzen:** *(Überholt am selben Tag: die Ursache war Late Chunking, nicht das
+Ranking, siehe nächster Eintrag.)* Das größere Problem ist das Ranking, nicht die Länge. Die richtige Notiz
+steht in 52 % der Fälle auf Platz 1, die richtige *Stelle* nur in 9 %. Unter 20 Kandidaten
+ist die Notiz in 87 % der Fälle. Nächster Hebel laut Plan: ein Cross-Encoder hinter
+ColBERT. Kompression kostet rund 300 ms je Suche (p50 67 → 362 ms). Leckage in allen
+Läufen 0. „Höchstens zwei Treffer je Notiz“ (Hebel 2) verschlechtert: 0,38 → 0,32 bei
+top_k 5, weil die richtige Stelle oft der zweite oder dritte Abschnitt derselben Notiz
+ist; verworfen. Der Wechsel des Connectors auf top_k 5 hat 12 Punkte Stellen-Recall
+gekostet; mit `kompakt` ließe er sich bei gleichen Kosten zurückholen. Die neuen Felder ändern den Contract `titan.openapi.yaml`, additiv; ob brain-mcp
+sie nutzt, ist eine Entscheidung auf Workspace-Ebene und noch nicht getroffen.
+
+## 2026-10-24: Late Chunking aus, jeder Chunk einzeln mit Kopfzeile eingebettet
+**Entscheidung:** `settings.late_chunking = False`. `ingest.embed_chunks` bettet jeden
+Chunk für sich ein, mit `Notiztitel › Abschnitt` davor (`mit_kopfzeile`); gespeichert und
+angezeigt wird weiter nur der Chunk-Text. Late Chunking bleibt per Einstellung schaltbar.
+Der Live-Index ist am selben Tag mit `force` neu eingelesen (55 Notizen, 770 Chunks).
+**Begründung:** Experiment mit sechs Test-Collections, gleiche 165 Fragen mit Sollstelle.
+Die ersten vier haben exakt dieselben 770 Chunk-Grenzen wie der Live-Index, nur die
+Einbettung unterscheidet sich:
+
+| Variante | Stelle @1 | @5 | @10 | @50 | mit Reranker @5 |
+|---|---|---|---|---|---|
+| Late Chunking (wie bisher) | 0,10 | 0,42 | 0,55 | 0,81 | 0,71 |
+| nur Dense einzeln (CLS), Sparse/ColBERT late | 0,09 | 0,42 | 0,53 | 0,82 | 0,72 |
+| einzeln | 0,41 | 0,71 | 0,84 | 0,95 | 0,78 |
+| **einzeln + Kopfzeile** | **0,50** | **0,82** | **0,87** | 0,96 | 0,78 |
+| kleinere Chunks (bis `###`, 1 200 Zeichen) + Kopfzeile | 0,50 | 0,80 | 0,85 | 0,95 | 0,77 |
+| kleinere Chunks, late | 0,12 | 0,30 | 0,41 | 0,67 | 0,58 |
+
+- Das Fenster war 7 800 Tokens groß, also meist die ganze Notiz. Jeder Abschnitt trug
+  deren Kontext, die Abschnitte einer Notiz glichen sich, und die Suche fand das Thema,
+  nicht die Stelle (Notiz @1 52 %, Stelle @1 9 %).
+- Der Verdacht, das Mean-Pooling des Dense-Vektors passe nicht zum CLS-Pooling der Frage,
+  ist widerlegt (Zeile 2). Den Ausschlag geben ColBERT und Sparse, die das Endranking
+  machen.
+- **Kein Cross-Encoder.** `bge-reranker-v2-m3` über die Top 50 hebt nur den kaputten Index
+  (0,42 → 0,71) und senkt den guten (0,82 → 0,78), bei rund 570 ms je Frage.
+- **Keine kleineren Chunks.** Kein Gewinn, 50 % mehr Punkte.
+
+Nachgemessen am Live-Dienst nach dem Reingest (`vault_eval --label einzeln_kopf`, 196
+Fälle): top_k 5 Stelle 0,38 → 0,81, Stelle @1 0,09 → 0,50, Notiz @5 0,74 → 0,90,
+Leckage 0, p50 115 ms.
+**Konsequenzen:**
+- Für die Zukunft: Late Chunking hilft, wenn ein Abschnitt ohne seine Nachbarn nicht zu
+  verstehen ist (Pronomen, „wie oben"). Die Vault-Notizen sind so geschrieben, dass jeder
+  Abschnitt für sich steht; den Rest trägt die Kopfzeile. Für lange PDFs ohne gute
+  Überschriften kann es wieder anders aussehen — vor dem Umschalten mit `vault_eval`
+  messen, nicht nach Gefühl.
+- Schwächster Fragetyp ist jetzt „abhängigkeit" (Stelle @5 0,40): Fragen über mehrere
+  verlinkte Notizen. Das ist der Link-Graph-Hebel aus dem Eval-Plan, Abschnitt 6.
+- Mit 0,81 bei top_k 5 und 0,87 bei top_k 10 trägt der Connector-Default 5 wieder; die
+  Kompression (`kompakt`) bleibt als Option, ist aber nicht mehr nötig, um Recall
+  zurückzuholen.
+- Das Experiment-Skript lag im Scratchpad und ist nicht im Repo; die Tabelle oben ist
+  das Ergebnis.
+
+## 2026-10-24: Abhängigkeitsfragen — Link-Graph und Zerlegung im Ranking verworfen
+**Entscheidung:** Weder ein Link-Bonus noch Query-Zerlegung kommt in die Suche.
+Abhängigkeitsfragen („was hängt an X") löst der Aufrufer in zwei Schritten: X finden,
+dann die Rückverweise lesen. brain-mcp gibt sie dafür seit heute in `find_related` mit
+aus (Namen, je Richtung), und der Claude-Code-Skill `vault-recherche` plant genau diesen
+zweiten Schritt.
+**Begründung:** Gemessen gegen den Index mit Einzel-Embedding (Stelle @5 gesamt 0,81,
+„abhängigkeit" 0,40):
+- **Link-Bonus** auf die 50 Kandidaten, wenn ihre Notiz mit den ersten ein bis drei
+  Treffer-Notizen verlinkt ist, gedämpft nach Linkzahl; dazu Varianten mit festen
+  Plätzen für Nachbarn. Bestes Ergebnis „abhängigkeit" 0,47 bei gesamt 0,80, alle
+  anderen verloren. Der Vault ist zu dicht verlinkt: Median 12 Nachbarn bei 57 Notizen,
+  „ist verlinkt" trennt kaum.
+- **Zerlegung per Phi-4** (`use_decompose`, `vault_eval --zerlegen`): „abhängigkeit"
+  0,40 → 0,47, gesamt 0,81 → 0,70, p50 115 ms → 5,9 s. Phi-4 zerlegt nicht in Schritte,
+  sondern in Stichwörter („Studium", „aktuell", „was betrifft").
+**Konsequenzen:** Der Connector bleibt bei `use_decompose=False`. Ein stärkeres lokales
+Modell mit besserem Prompt wäre ein eigener Versuch; er lohnt sich am ehesten für
+`/ask`, wo kein Claude die Schritte plant. Feintuning von BGE-M3 ist bei 770 Chunks nicht
+sinnvoll: Die Trainingsfragen kämen aus derselben Quelle wie das Goldset, die Messung
+wäre danach wertlos.
