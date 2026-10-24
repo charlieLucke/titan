@@ -32,6 +32,11 @@ class TitanSettings(BaseSettings):
     # Path-Traversal-Schutz: CLI-Ingest nur aus diesem Verzeichnis erlaubt
     ingest_base_dir: Path = Path("/mnt/f/data/titan-input")
     late_chunk_window_tokens: int = 7800
+    # Aus seit 24.10.2026: am Goldset (165 Fragen) fand Late Chunking die richtige
+    # Stelle unter den ersten fuenf in 38 %, jeder Chunk einzeln mit Kopfzeile in
+    # 82 %. Begruendung in docs/ai/DECISIONS.md. Nach dem Umschalten den Vault neu
+    # ingestieren — die beiden Vektorarten vertragen sich nicht in einem Index.
+    late_chunking: bool = False
 
     # ── Vault (Service-Ingest, POST /ingest/file) ─────────────────────────
     vault_root: Path = Path("/mnt/f/vault")

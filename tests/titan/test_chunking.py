@@ -30,7 +30,7 @@ def test_chunk_per_header() -> None:
     assert [c.chunk_id for c in chunks] == [0, 1, 2]
     assert all(c.source == "test.md" for c in chunks)
     assert all(c.document_title == "Titel" for c in chunks)
-    # Embeddings werden erst von late_chunk_embed befüllt
+    # Embeddings werden erst von embed_chunks befüllt
     assert all(c.dense is None and c.sparse is None and c.colbert is None for c in chunks)
 
 

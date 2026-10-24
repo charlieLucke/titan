@@ -873,8 +873,57 @@ def read_markdown(file_path: Path) -> tuple[str, dict[str, Any]]:
     return content, meta
 
 
-def late_chunk_and_embed(content: str, model: Any) -> list[Chunk]:
-    """Kombiniert chunk_markdown + late_chunk_embed für Markdown-Content.
+def mit_kopfzeile(chunk: Chunk) -> str:
+    """Der Text, der eingebettet wird: Notiztitel und Abschnitt vor dem Chunk.
+
+    Ersatz fuer den Kontext, den Late Chunking ueber die ganze Notiz verteilt hat —
+    hier steht er einmal vorn, und der Chunk selbst bleibt fuer sich. Gespeichert
+    und angezeigt wird weiter nur ``chunk.text``.
+    """
+    return f"{chunk.document_title} › {chunk.header}\n\n{chunk.text}"
+
+
+def einzeln_embed(model: Any, chunks: list[Chunk]) -> list[Chunk]:
+    """Bettet jeden Chunk fuer sich ein, mit Kopfzeile (siehe ``mit_kopfzeile``).
+
+    Gemessen am 24.10.2026 gegen Late Chunking, gleiche Chunk-Grenzen, 165 Fragen:
+    die richtige Stelle unter den ersten fuenf in 82 statt 38 %. Late Chunking gibt
+    jedem Abschnitt den Kontext der ganzen Notiz mit; die Abschnitte einer Notiz
+    sehen sich dadurch aehnlich, und die Suche fand das Thema, nicht die Stelle.
+
+    ``max_length`` = MAX_COLBERT_ROWS: die Kopfzeile kostet ein paar Tokens, und ein
+    Chunk am Budget wuerde sonst Qdrants 1-MiB-Grenze reissen. Abgeschnitten wird
+    dann nur das Ende seines *Vektors*, der gespeicherte Text bleibt ganz.
+
+    Schreibt dense/sparse/colbert in-place, wie ``late_chunk_embed``.
+    """
+    if not chunks:
+        return chunks
+    with torch.no_grad():
+        out = model.encode(
+            [mit_kopfzeile(c) for c in chunks],
+            return_dense=True,
+            return_sparse=True,
+            return_colbert_vecs=True,
+            batch_size=EMBED_BATCH_SIZE,
+            max_length=MAX_COLBERT_ROWS,
+        )
+    for i, chunk in enumerate(chunks):
+        chunk.dense = out["dense_vecs"][i].tolist()
+        chunk.sparse = {str(k): float(v) for k, v in out["lexical_weights"][i].items()}
+        chunk.colbert = out["colbert_vecs"][i].tolist()
+    return chunks
+
+
+def embed_chunks(model: Any, chunks: list[Chunk]) -> list[Chunk]:
+    """Bettet Chunks so ein, wie ``settings.late_chunking`` es verlangt."""
+    if settings.late_chunking:
+        return late_chunk_embed(model, chunks)
+    return einzeln_embed(model, chunks)
+
+
+def chunk_and_embed(content: str, model: Any, source_path: Path) -> list[Chunk]:
+    """Kombiniert chunk_markdown + embed_chunks für Markdown-Content.
 
     Convenience-Wrapper für den Service-Pfad. Das Modell wird übergeben
     (kein eigenes Loading/Lock).
@@ -882,15 +931,13 @@ def late_chunk_and_embed(content: str, model: Any) -> list[Chunk]:
     Args:
         content: Markdown-Inhalt (ohne Frontmatter).
         model: Vorgeladene BGEM3FlagModel-Instanz.
+        source_path: Pfad der Notiz. Ohne `# Titel` wird ihr Name zur Kopfzeile;
+            ein Platzhalter stuende sonst in jedem Vektor der Notiz.
 
     Returns:
         Chunks mit dense/sparse/colbert-Vektoren.
     """
-    # Für Markdown ohne echten source-Pfad nutzen wir einen Placeholder.
-    # Der Caller setzt source_path im Payload beim Upsert.
-    placeholder_path = Path("<service-ingest>")
-    raw_chunks = chunk_markdown(content, placeholder_path)
-    return late_chunk_embed(model, raw_chunks)
+    return embed_chunks(model, chunk_markdown(content, source_path))
 
 
 def make_point(
@@ -1085,10 +1132,10 @@ def main() -> None:
     # ── Phase 3a: BGE-M3 laden ────────────────────────────────────────────────
     model = load_bge_m3_model()
 
-    # ── Phase 3b: Late-Chunking-Embedding (Epic 3) ────────────────────────────
-    # late_chunk_embed mutiert die Chunk-Dicts in-place — die Datei-Zuordnung
+    # ── Phase 3b: Embedding (einzeln oder Late Chunking, settings.late_chunking) ─
+    # embed_chunks mutiert die Chunks in-place — die Datei-Zuordnung
     # in files_with_chunks bleibt dadurch gültig.
-    late_chunk_embed(model, all_chunks)
+    embed_chunks(model, all_chunks)
 
     # ── Phase 3c: Upsert in Qdrant via gRPC ──────────────────────────────────
     client = build_qdrant_client()
