@@ -196,7 +196,9 @@ def rrf_fusion(ranked_lists: list[list[dict[str, Any]]], k: int = 60) -> list[di
             if doc_id not in payloads:
                 payloads[doc_id] = result
 
-    fused_ids = sorted(rrf_scores, key=lambda x: rrf_scores[x], reverse=True)
+    # Gleichstand nach Punkt-ID aufloesen (Rang 1 + 3 ergibt denselben Wert wie 3 + 1).
+    # Sonst entscheidet die Reihenfolge der Teilfragen, und die kommt vom LLM.
+    fused_ids = sorted(rrf_scores, key=lambda x: (-rrf_scores[x], str(x)))
 
     return [
         {**payloads[doc_id], "rank": new_rank, "score": round(rrf_scores[doc_id], 6)}
