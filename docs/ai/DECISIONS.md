@@ -311,5 +311,8 @@ Kandidaten bringt Stelle @1 rund 14 Punkte über ColBERT allein, bei etwa 0,7 bi
 pro Suche. Kurztest hier am 08.11.: Laden 22 s, 8,2 GB VRAM, zwei Passagen in 0,7 s.
 **Konsequenzen:** Mit dem 4B-Modell fehlen Phi-4 rund 8 GB; `/ask` kann dann langsamer
 werden, weil Ollama Schichten auf die CPU legt. Der Connector nutzt keine Zerlegung, die
-Suche ist davon nicht betroffen. Die eigene Messung mit `vault_eval` steht nach dem
-Neustart an; erst danach entscheiden, ob der Schalter dauerhaft an bleibt.
+Suche ist davon nicht betroffen.
+**Messung 08.11. nach dem Neustart** (`vault_eval`, 196 Fälle, gleicher Dienst, einmal mit
+`--ohne-reranker`): Stelle @1 0,47 → 0,59, @3 0,68 → 0,79, @5 0,77 → 0,81, MRR 0,58 →
+0,69; bei k5 sieben Fälle neu gefunden, einer verloren. Latenz p50 85 → 940 ms. Der
+Schalter bleibt in der lokalen `.env` an (`RERANK_MODEL=qwen3-reranker-4b`).
