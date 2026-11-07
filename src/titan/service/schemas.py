@@ -17,6 +17,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok", "degraded"]
     bge_loaded: bool
     qdrant_reachable: bool
+    cuda_ok: bool | None = None  # None wenn BGE nicht geladen; False nach einem GPU-Reset
     vram_used_mb: int | None
     collection_name: str
     colbert_dim: int | None  # None wenn BGE nicht geladen
