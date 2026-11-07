@@ -1,0 +1,10 @@
+[Unit]
+Description=Titan: nach einem GPU-Reset neu starten (titan.tools.watchdog)
+After=titan-service.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/charl/projects/titan
+ExecStart=/home/charl/projects/titan/.venv/bin/python -m titan.tools.watchdog
+StandardOutput=append:/home/charl/projects/titan/logs/watchdog.log
+StandardError=append:/home/charl/projects/titan/logs/watchdog.log
