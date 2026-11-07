@@ -38,6 +38,7 @@ import requests
 import torch
 
 from titan.config import settings
+from titan.rerank import Scorer, rerank
 from titan.utils import acquire_gpu_lock, cache_uuid, sanitize
 
 # Windows: stdout-Pipe auf UTF-8 erzwingen (verhindert UnicodeEncodeError bei
@@ -675,6 +676,7 @@ def search(
     use_cache: bool = True,
     model: Any | None = None,
     qdrant_client: Any | None = None,
+    reranker: Scorer | None = None,
 ) -> dict[str, Any]:
     """Führt eine vollständige Hybrid-Suche durch (CLI- und Service-Pfad).
 
@@ -691,12 +693,15 @@ def search(
         use_cache: Epic-5B Semantic Cache nutzen.
         model: Optional vorgeladene BGEM3FlagModel-Instanz (Service-Pfad).
         qdrant_client: Optional vorgeladener QdrantClient (Service-Pfad).
+        reranker: Optionaler Cross-Encoder; ordnet die besten ``RERANK_POOL`` Treffer
+            nach der Fusion neu (der Cache haelt weiter die ColBERT-Listen).
 
     Returns:
         Dict mit keys:
             chunks:      list[dict] – finales Ranking
             sub_queries: list[str] – generierte Sub-Queries
             cache_hit:   bool – True wenn mind. eine Sub-Query aus Cache kam
+            reranked:    bool – True wenn der Cross-Encoder geordnet hat
     """
     _own_lock: Any = None
     _own_model = model is None
@@ -756,14 +761,19 @@ def search(
     if not ranked_lists:
         final: list[dict[str, Any]] = []
     elif len(ranked_lists) > 1:
-        final = rrf_fusion(ranked_lists)[:top_k]
+        final = rrf_fusion(ranked_lists)
     else:
-        final = ranked_lists[0][:top_k]
+        final = ranked_lists[0]
+
+    reranked = reranker is not None and bool(final)
+    if reranker is not None and final:
+        final = rerank(reranker, query, final, settings.rerank_pool)
 
     return {
-        "chunks": final,
+        "chunks": final[:top_k],
         "sub_queries": sub_queries,
         "cache_hit": cache_hit,
+        "reranked": reranked,
     }
 
 

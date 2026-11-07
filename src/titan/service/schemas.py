@@ -32,6 +32,9 @@ class SearchRequest(BaseModel):
     top_k: int = Field(default=10, ge=1, le=50)
     use_decompose: bool = True
     use_cache: bool = True
+    # Cross-Encoder nutzen, falls der Dienst ihn geladen hat (RERANK_MODEL). False
+    # erlaubt den Vergleich ohne Neustart.
+    rerank: bool = True
     # Treffer extraktiv auf die passenden Zeilen kuerzen (titan.kompakt). Additiv
     # und aus per Default: ein Aufrufer, der es nicht kennt, sieht nichts Neues.
     kompakt: bool = False
@@ -53,6 +56,7 @@ class SearchResponse(BaseModel):
     sub_queries: list[str]
     cache_hit: bool
     latency_ms: int
+    reranked: bool = False
 
 
 # ─── Ask (RAG: Retrieval + Phi-4-Antwort) ─────────────────────────────────────
@@ -64,6 +68,7 @@ class AskRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     use_decompose: bool = True
     use_cache: bool = True
+    rerank: bool = True
 
 
 class AskResponse(BaseModel):

@@ -20,6 +20,8 @@ class ServiceState:
         self.bge_model: Any | None = None
         self.qdrant_client: Any | None = None
         self.gpu_lock: Any | None = None
+        # Cross-Encoder (titan.rerank), nur wenn RERANK_MODEL gesetzt ist.
+        self.reranker: Any | None = None
         # Serialisiert GPU-Arbeit und Index-Mutationen. Die Routes laufen als
         # Sync-Handler im FastAPI-Threadpool (sonst blockiert die GPU-Arbeit den
         # Event-Loop und /health hängt während eines Ingests); ohne dieses Lock

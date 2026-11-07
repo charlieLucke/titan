@@ -230,6 +230,7 @@ def search_endpoint(req: SearchRequest) -> SearchResponse:
             use_cache=req.use_cache,
             model=state.bge_model,
             qdrant_client=state.qdrant_client,
+            reranker=state.reranker if req.rerank else None,
         )
         if req.kompakt and result["chunks"]:
             from titan.kompakt import kompaktiere
@@ -274,6 +275,7 @@ def search_endpoint(req: SearchRequest) -> SearchResponse:
         sub_queries=result.get("sub_queries", []),
         cache_hit=result.get("cache_hit", False),
         latency_ms=latency_ms,
+        reranked=result.get("reranked", False),
     )
 
 
@@ -304,6 +306,7 @@ def ask_endpoint(req: AskRequest) -> AskResponse:
             use_cache=req.use_cache,
             model=state.bge_model,
             qdrant_client=state.qdrant_client,
+            reranker=state.reranker if req.rerank else None,
         )
         state.search_count += 1
         if result.get("cache_hit", False):
