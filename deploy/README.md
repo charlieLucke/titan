@@ -47,6 +47,22 @@ curl http://localhost:8765/health
 > an, bevor du die Unit aktivierst (systemd expandiert `~` innerhalb von
 > Unit-Dateien nicht).
 
+## Wächter nach GPU-Reset
+
+Nach einem Treiber-Reset (TDR) meldet `/health` `cuda_ok: false`, und nur ein Neustart
+hilft. `titan-watchdog.timer` prüft alle zwei Minuten und startet titan neu, wenn das
+Power-Limit noch höchstens 200 W beträgt und der letzte Neustart über 15 Minuten her ist.
+Steht das Limit nach dem Reset wieder auf 285 W, startet er nicht und schreibt die
+Anweisung ins Log: in Windows als Admin `nvidia-smi -pl 200`, dann neu starten.
+
+```bash
+ln -sf ~/projects/titan/deploy/titan-watchdog.service ~/.config/systemd/user/
+ln -sf ~/projects/titan/deploy/titan-watchdog.timer ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now titan-watchdog.timer
+tail ~/projects/titan/logs/watchdog.log
+```
+
 ## Logs
 
 ```bash

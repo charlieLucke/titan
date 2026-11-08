@@ -128,6 +128,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     state.bge_model = load_bge_m3_model()
     state.qdrant_client = make_qdrant_client()
+    if settings.rerank_model:
+        from titan.rerank import QwenReranker  # nur bei Bedarf: laedt transformers
+
+        state.reranker = QwenReranker(settings.rerank_model, settings.rerank_max_tokens)
 
     try:
         _validate_embedding_dimension(state.qdrant_client)
@@ -156,6 +160,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await cleanup_task
     del state.bge_model
     state.bge_model = None
+    state.reranker = None
     torch.cuda.empty_cache()
     if state.gpu_lock is not None:
         lock = state.gpu_lock

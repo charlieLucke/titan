@@ -113,6 +113,22 @@ def _to_notes_response(aggregates: list[NoteAggregate]) -> NotesResponse:
 # ─── Health ──────────────────────────────────────────────────────────────────
 
 
+def _cuda_ok() -> bool:
+    """Ob die GPU noch rechnet: eine winzige Operation mit Synchronisation.
+
+    Nach einem Treiber-Reset (Windows-TDR unter WSL) bleibt das Modell scheinbar geladen,
+    aber jede CUDA-Operation scheitert, und /search antwortet mit 500. Ohne diese Probe
+    meldete /health weiter "ok"; nur ein Neustart des Dienstes hilft.
+    """
+    try:
+        probe = torch.ones(1, device="cuda") + 1
+        torch.cuda.synchronize()
+        return bool(probe.item() == 2.0)
+    except RuntimeError as exc:  # torch.AcceleratorError erbt von RuntimeError
+        log.error("CUDA-Probe fehlgeschlagen, Dienst neu starten: %s", exc)
+        return False
+
+
 @router.get("/health", response_model=HealthResponse)
 def health() -> HealthResponse:
     """Service-Status: BGE-M3 geladen, Qdrant erreichbar, VRAM-Nutzung.
@@ -128,19 +144,21 @@ def health() -> HealthResponse:
     if state.qdrant_client is not None:
         qdrant_reachable = QdrantRepository(state.qdrant_client, COLLECTION_NAME).collection_ready()
 
+    cuda_ok = _cuda_ok() if bge_loaded else None
     vram_used_mb: int | None = None
-    if bge_loaded and state.bge_model is not None:
-        with contextlib.suppress(Exception):
-            vram_used_mb = int(torch.cuda.memory_allocated() / 1024 / 1024)
+    if cuda_ok:
+        vram_used_mb = int(torch.cuda.memory_allocated() / 1024 / 1024)
     # colbert_dim is measured once at startup and cached in state (avoids per-request encode).
     colbert_dim: int | None = state.colbert_dim
 
-    overall: Literal["ok", "degraded"] = "ok" if (bge_loaded and qdrant_reachable) else "degraded"
+    healthy = bge_loaded and qdrant_reachable and cuda_ok is True
+    overall: Literal["ok", "degraded"] = "ok" if healthy else "degraded"
 
     return HealthResponse(
         status=overall,
         bge_loaded=bge_loaded,
         qdrant_reachable=qdrant_reachable,
+        cuda_ok=cuda_ok,
         vram_used_mb=vram_used_mb,
         collection_name=COLLECTION_NAME,
         colbert_dim=colbert_dim,
@@ -212,6 +230,7 @@ def search_endpoint(req: SearchRequest) -> SearchResponse:
             use_cache=req.use_cache,
             model=state.bge_model,
             qdrant_client=state.qdrant_client,
+            reranker=state.reranker if req.rerank else None,
         )
         if req.kompakt and result["chunks"]:
             from titan.kompakt import kompaktiere
@@ -256,6 +275,7 @@ def search_endpoint(req: SearchRequest) -> SearchResponse:
         sub_queries=result.get("sub_queries", []),
         cache_hit=result.get("cache_hit", False),
         latency_ms=latency_ms,
+        reranked=result.get("reranked", False),
     )
 
 
@@ -286,6 +306,7 @@ def ask_endpoint(req: AskRequest) -> AskResponse:
             use_cache=req.use_cache,
             model=state.bge_model,
             qdrant_client=state.qdrant_client,
+            reranker=state.reranker if req.rerank else None,
         )
         state.search_count += 1
         if result.get("cache_hit", False):

@@ -294,3 +294,25 @@ Modell mit besserem Prompt wäre ein eigener Versuch; er lohnt sich am ehesten f
 `/ask`, wo kein Claude die Schritte plant. Feintuning von BGE-M3 ist bei 770 Chunks nicht
 sinnvoll: Die Trainingsfragen kämen aus derselben Quelle wie das Goldset, die Messung
 wäre danach wertlos.
+
+## 2026-11-08: Cross-Encoder als Schalter, Tie-Break in der Fusion, CUDA-Probe in /health
+**Entscheidung:** Drei Übernahmen aus titan-platform, freigegeben von Charlie am 08.11.:
+- `RERANK_MODEL` (leer = aus) lädt beim Start einen Qwen3-Reranker. Er ordnet nach der
+  Fusion die besten `RERANK_POOL` (10) Treffer neu und liest dabei Notizname, Abschnitt
+  und Text, auf 512 Tokens gekürzt. `/search` und `/ask` nehmen `rerank: false` für den
+  Vergleich ohne Neustart, `vault_eval --ohne-reranker` ebenso. Der Cache speichert weiter
+  die ColBERT-Listen; der Reranker läuft danach, alte Einträge bleiben also gültig.
+- `rrf_fusion` löst Gleichstände nach Punkt-ID auf, statt nach der Reihenfolge der
+  Teilfragen, die von Phi-4 kommt.
+- `/health` rechnet eine winzige CUDA-Operation. Nach einem Treiber-Reset (TDR, zuletzt am
+  04.11.) meldete der Dienst bisher „ok“, während `/search` mit 500 scheiterte.
+**Begründung:** In titan-platform am Vault-Goldset gemessen: Qwen3-Reranker-4B über zehn
+Kandidaten bringt Stelle @1 rund 14 Punkte über ColBERT allein, bei etwa 0,7 bis 0,8 s
+pro Suche. Kurztest hier am 08.11.: Laden 22 s, 8,2 GB VRAM, zwei Passagen in 0,7 s.
+**Konsequenzen:** Mit dem 4B-Modell fehlen Phi-4 rund 8 GB; `/ask` kann dann langsamer
+werden, weil Ollama Schichten auf die CPU legt. Der Connector nutzt keine Zerlegung, die
+Suche ist davon nicht betroffen.
+**Messung 08.11. nach dem Neustart** (`vault_eval`, 196 Fälle, gleicher Dienst, einmal mit
+`--ohne-reranker`): Stelle @1 0,47 → 0,59, @3 0,68 → 0,79, @5 0,77 → 0,81, MRR 0,58 →
+0,69; bei k5 sieben Fälle neu gefunden, einer verloren. Latenz p50 85 → 940 ms. Der
+Schalter bleibt in der lokalen `.env` an (`RERANK_MODEL=qwen3-reranker-4b`).

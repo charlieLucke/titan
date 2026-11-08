@@ -19,6 +19,7 @@ import contextlib
 import os
 import textwrap
 import uuid
+import warnings
 from collections.abc import Generator
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,7 @@ def qdrant_client() -> Generator[Any, None, None]:
         check_compatibility=False,
     )
 
+    _drop_stale_test_collections(client)
     client.create_collection(
         collection_name=TEST_COLLECTION,
         vectors_config={
@@ -81,13 +83,26 @@ def qdrant_client() -> Generator[Any, None, None]:
     yield client
 
     # Teardown defensiv: ein transienter gRPC-Fehler beim Cleanup darf den
-    # Test-Lauf nicht rot färben.
-    with contextlib.suppress(Exception):
-        client.delete_collection(TEST_COLLECTION)
-    with contextlib.suppress(Exception):
-        client.delete_collection(TEST_CACHE_COLLECTION)
+    # Test-Lauf nicht rot färben. Er wird aber gemeldet, und der nächste Lauf
+    # räumt liegengebliebene Test-Collections weg (siehe _drop_stale_test_collections).
+    for name in (TEST_COLLECTION, TEST_CACHE_COLLECTION):
+        try:
+            client.delete_collection(name)
+        except Exception as exc:  # noqa: BLE001 — nur melden, siehe oben
+            warnings.warn(f"Test-Collection {name} nicht gelöscht: {exc}", stacklevel=1)
     with contextlib.suppress(Exception):
         client.close()
+
+
+def _drop_stale_test_collections(client: Any) -> None:
+    """Löscht Test-Collections früherer Läufe, deren Teardown gescheitert ist.
+
+    Nur Namen mit dem Präfix ``titan_test_``; mein_wissen und query_cache sind
+    dadurch ausgeschlossen.
+    """
+    for c in client.get_collections().collections:
+        if c.name.startswith("titan_test_") and not c.name.startswith(TEST_COLLECTION):
+            client.delete_collection(c.name)
 
 
 @pytest.fixture(scope="module")

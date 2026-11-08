@@ -128,6 +128,14 @@ def test_rrf_preserves_payload() -> None:
     assert fused[0]["rank"] == 1
 
 
+def test_rrf_ties_do_not_depend_on_list_order() -> None:
+    """Rang 1 + 2 und 2 + 1 ergeben denselben Wert; die Punkt-ID entscheidet."""
+    a = [{"id": "b"}, {"id": "a"}]
+    b = [{"id": "a"}, {"id": "b"}]
+    assert [h["id"] for h in rrf_fusion([a, b])] == ["a", "b"]
+    assert [h["id"] for h in rrf_fusion([b, a])] == ["a", "b"]
+
+
 def test_rrf_empty_lists() -> None:
     assert rrf_fusion([]) == []
     assert rrf_fusion([[], []]) == []

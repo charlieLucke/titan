@@ -199,7 +199,7 @@ def zusammenfassen(zeilen: Sequence[dict[str, Any]]) -> dict[str, Any]:
 
 
 def suche(
-    url: str, frage: str, kompakt: int | None, zerlegen: bool = False
+    url: str, frage: str, kompakt: int | None, zerlegen: bool = False, rerank: bool = True
 ) -> tuple[list[Treffer], int]:
     payload: dict[str, Any] = {
         "query": frage,
@@ -208,6 +208,8 @@ def suche(
         # Lauf ihn.
         "use_decompose": zerlegen,
         "use_cache": False,
+        # Wirkt nur, wenn der Dienst mit RERANK_MODEL gestartet ist.
+        "rerank": rerank,
     }
     if kompakt:
         payload |= {"kompakt": True, "kompakt_zeichen": kompakt}
@@ -228,11 +230,15 @@ def suche(
 
 
 def lauf(
-    faelle: Sequence[Fall], url: str, kompakt: int | None, zerlegen: bool = False
+    faelle: Sequence[Fall],
+    url: str,
+    kompakt: int | None,
+    zerlegen: bool = False,
+    rerank: bool = True,
 ) -> list[dict[str, Any]]:
     zeilen = []
     for i, fall in enumerate(faelle, 1):
-        kandidaten, ms = suche(url, fall.frage, kompakt, zerlegen)
+        kandidaten, ms = suche(url, fall.frage, kompakt, zerlegen, rerank)
         zeile: dict[str, Any] = {"id": fall.id, "typ": fall.typ, "latenz_ms": ms}
         for v in VARIANTEN:
             zeile[v.name] = bewerte(fall, auswahl(kandidaten, v))
@@ -356,6 +362,11 @@ def main() -> None:
         help="Treffer extraktiv auf ZEICHEN je Treffer kuerzen",
     )
     p.add_argument("--zerlegen", action="store_true", help="Frage per Phi-4 in Teilfragen zerlegen")
+    p.add_argument(
+        "--ohne-reranker",
+        action="store_true",
+        help="Cross-Encoder fuer diesen Lauf auslassen (Vergleich ohne Neustart)",
+    )
     p.add_argument("--compare", nargs=2, metavar=("A", "B"))
     args = p.parse_args()
 
@@ -369,7 +380,7 @@ def main() -> None:
         log.warning("%d verwaiste Faelle uebersprungen: %s", len(weg), ", ".join(sorted(weg)))
     faelle = [f for f in faelle if f.id not in weg]
 
-    zeilen = lauf(faelle, args.url, args.kompakt, args.zerlegen)
+    zeilen = lauf(faelle, args.url, args.kompakt, args.zerlegen, not args.ohne_reranker)
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     stamm = LOG_DIR / f"{date.today().isoformat()}_{args.label}"
     stamm.with_suffix(".jsonl").write_text(

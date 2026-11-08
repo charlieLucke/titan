@@ -50,6 +50,13 @@ class TitanSettings(BaseSettings):
     judge_model: str = "phi4:latest"
     judge_timeout: int = 60
 
+    # ── Cross-Encoder (titan.rerank) ──────────────────────────────────────
+    # Leer = aus. "qwen3-reranker-4b" kostet rund 8 GB VRAM, die Phi-4 dann fehlen;
+    # der Dienst laedt ihn beim Start. Gemessen und begruendet in docs/ai/DECISIONS.md.
+    rerank_model: str = ""
+    rerank_pool: int = 10
+    rerank_max_tokens: int = 512
+
     # ── Epic 5B: Semantic Caching ─────────────────────────────────────────
     cache_enabled: bool = True
     cache_collection_name: str = "query_cache"
