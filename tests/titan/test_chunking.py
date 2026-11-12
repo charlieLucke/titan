@@ -8,12 +8,20 @@ das decompose_query-Parsing (Ollama-Antwortvarianten, gemockt).
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from titan.ingest import MAX_SUPER_CHUNK_CHARS, _group_into_windows, chunk_markdown
+import titan.ingest
+from titan.config import TitanSettings
+from titan.ingest import (
+    MAX_SUPER_CHUNK_CHARS,
+    _group_into_windows,
+    chunk_markdown,
+    header_regex,
+)
 from titan.models import Chunk
 from titan.search import decompose_query, rrf_fusion
 
@@ -64,6 +72,134 @@ def test_split_keeps_document_ends() -> None:
     chunks = chunk_markdown("# Big\n" + body, SRC)
     assert chunks[0].text.startswith("# Big")
     assert "ENDE-MARKER" in chunks[-1].text
+
+
+# ─── Zuschnitt: Standardverhalten und Einstellbarkeit ───────────────────────
+
+_TEXT_STUFEN = (
+    "# Titel\nIntro zum Titel.\n## Abschnitt A\nText A.\n### Unterpunkt A1\nText A1.\n"
+    "### Unterpunkt A2\nText A2.\n## Abschnitt B\nText B.\n"
+)
+_TEXT_LANG = (
+    "# Lang\n"
+    + ("Satz mit ein paar Wörtern. " * 40 + "\n\n") * 4
+    + "## Kurz\nKurzer Text.\n## Noch länger\n"
+    + ("wort " * 1200).strip()
+)
+_TEXT_VORSPANN = (
+    "Vorspann ohne Überschrift.\n\nNoch ein Absatz.\n\n## Erst jetzt\nInhalt.\n"
+    "### Tiefer\nTiefer Inhalt.\n#### Ganz tief\nSehr tief.\n"
+)
+
+
+def _fest(text: str) -> list[Chunk]:
+    return chunk_markdown(text, Path("/vault/notes/beispiel.md"), zaehle=lambda s: len(s) // 3)
+
+
+def _sid(header: str) -> str:
+    return hashlib.sha256(f"beispiel.md::{header}".encode()).hexdigest()[:16]
+
+
+def test_standardzuschnitt_bleibt_byte_gleich_stufen() -> None:
+    """Erwartung vor der Umstellung am unveraenderten Code erzeugt."""
+    chunks = _fest(_TEXT_STUFEN)
+    assert [c.header for c in chunks] == ["Titel", "Abschnitt A", "Abschnitt B"]
+    assert [len(c.text) for c in chunks] == [24, 76, 22]
+    assert [c.chunk_id for c in chunks] == [0, 1, 2]
+    assert [c.section_id for c in chunks] == [
+        "8c3487c20c071d10",
+        "f013292acd56de60",
+        "08b6a8c8d6697fb9",
+    ]
+    assert _hash_texte(chunks) == "f31e3ba1f06ecd49"
+
+
+def test_standardzuschnitt_bleibt_byte_gleich_lang() -> None:
+    chunks = _fest(_TEXT_LANG)
+    assert [c.header for c in chunks] == [
+        "Lang",
+        "Lang (Teil 2)",
+        "Kurz",
+        "Noch länger",
+        "Noch länger (Teil 2)",
+        "Noch länger (Teil 3)",
+    ]
+    assert [len(c.text) for c in chunks] == [2796, 1935, 20, 2799, 2799, 1214]
+    assert [c.chunk_id for c in chunks] == [0, 1, 2, 3, 4, 5]
+    assert [c.section_id for c in chunks] == [
+        "906f11788077b0e7",
+        "906f11788077b0e7",
+        "d69b210cf076533a",
+        "4457237a52bea6b7",
+        "4457237a52bea6b7",
+        "4457237a52bea6b7",
+    ]
+    assert _hash_texte(chunks) == "07ebcb91db448664"
+
+
+def test_standardzuschnitt_bleibt_byte_gleich_vorspann() -> None:
+    chunks = _fest(_TEXT_VORSPANN)
+    assert [c.header for c in chunks] == ["Erst jetzt"]
+    assert [len(c.text) for c in chunks] == [73]
+    assert [c.section_id for c in chunks] == ["b32161c590bb2cbb"]
+    assert _hash_texte(chunks) == "baf041bf5815f234"
+
+
+def _hash_texte(chunks: list[Chunk]) -> str:
+    return hashlib.sha256("\x00".join(c.text for c in chunks).encode()).hexdigest()[:16]
+
+
+def test_tiefe_3_schneidet_an_h3(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(titan.ingest, "_HEADER_RE", header_regex(3))
+    chunks = _fest(_TEXT_STUFEN)
+    assert [c.header for c in chunks] == [
+        "Titel",
+        "Abschnitt A",
+        "Unterpunkt A1",
+        "Unterpunkt A2",
+        "Abschnitt B",
+    ]
+    assert chunks[2].text.startswith("### Unterpunkt A1")
+    assert chunks[2].section_id == _sid("Unterpunkt A1")
+    assert len({c.section_id for c in chunks}) == len(chunks)
+
+
+def test_tiefe_2_schneidet_nicht_an_h3() -> None:
+    chunks = _fest(_TEXT_STUFEN)
+    assert "Unterpunkt A1" not in [c.header for c in chunks]
+    assert "### Unterpunkt A1" in chunks[1].text
+    assert chunks[1].section_id == _sid("Abschnitt A")
+
+
+def test_header_regex_prueft_tiefe() -> None:
+    assert header_regex(1).search("## zwei") is None
+    assert header_regex(6).search("###### sechs") is not None
+    for schlecht in (0, 7):
+        with pytest.raises(ValueError, match="Header-Tiefe"):
+            header_regex(schlecht)
+
+
+def test_kleineres_limit_wird_eingehalten(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(titan.ingest, "MAX_SUPER_CHUNK_CHARS", 1200)
+    monkeypatch.setattr(titan.ingest, "OVERLAP_CHARS", 200)
+    chunks = _fest(_TEXT_LANG)
+    assert len(chunks) > 6  # mehr Teile als bei 2800
+    assert all(len(c.text) <= 1200 for c in chunks)
+    assert chunks[1].text[:100] in chunks[0].text  # Overlap greift weiter
+
+
+def test_settings_validierung() -> None:
+    assert TitanSettings(chunk_header_tiefe=3).chunk_header_tiefe == 3
+    for schlecht in (
+        {"chunk_header_tiefe": 0},
+        {"chunk_header_tiefe": 7},
+        {"chunk_max_zeichen": 599},
+        {"chunk_overlap_zeichen": 2_800},
+        {"chunk_overlap_zeichen": -1},
+        {"chunk_max_zeichen": 1_000, "chunk_overlap_zeichen": 1_000},
+    ):
+        with pytest.raises(ValueError):
+            TitanSettings(**schlecht)
 
 
 # ─── _group_into_windows ─────────────────────────────────────────────────────
