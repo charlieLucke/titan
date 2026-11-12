@@ -202,6 +202,43 @@ def test_settings_validierung() -> None:
             TitanSettings(**schlecht)
 
 
+# ─── Codeblöcke ──────────────────────────────────────────────────────────────
+
+_TEXT_CODE = (
+    "# Titel\nIntro.\n## Skript\nVorher.\n```bash\n# kommentar\n## noch einer\nls\n```\n"
+    "Nachher.\n## Danach\nEnde.\n"
+)
+
+
+def test_codeblock_kommentar_schneidet_nicht() -> None:
+    chunks = chunk_markdown(_TEXT_CODE, SRC)
+    assert [c.header for c in chunks] == ["Titel", "Skript", "Danach"]
+    assert "# kommentar" in chunks[1].text
+    assert "## noch einer" in chunks[1].text
+    assert "Nachher." in chunks[1].text
+
+
+def test_ueberschrift_nach_codeblock_schneidet_wieder(monkeypatch: pytest.MonkeyPatch) -> None:
+    md = "## A\n~~~\n## kein Header\n~~~\n## B\nText.\n"
+    assert [c.header for c in chunk_markdown(md, SRC)] == ["A", "B"]
+    monkeypatch.setattr(titan.ingest, "_HEADER_RE", header_regex(3))
+    md = "## A\n  ```\n### kein Header\n  ```\n### B\nText.\n"
+    assert [c.header for c in chunk_markdown(md, SRC)] == ["A", "B"]
+
+
+def test_unbeendeter_codeblock_am_dateiende() -> None:
+    md = "# Titel\nText.\n```\n# kommentar\nohne Ende"
+    chunks = chunk_markdown(md, SRC)
+    assert [c.header for c in chunks] == ["Titel"]
+    assert "ohne Ende" in chunks[0].text
+
+
+def test_dokumenttitel_nicht_aus_codeblock() -> None:
+    md = "```\n# kommentar\n```\n# Echter Titel\nText.\n"
+    assert chunk_markdown(md, SRC)[0].document_title == "Echter Titel"
+    assert chunk_markdown("```\n# nur Kommentar\n```\n", SRC)[0].document_title == "test"
+
+
 # ─── _group_into_windows ─────────────────────────────────────────────────────
 
 

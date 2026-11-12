@@ -272,6 +272,26 @@ def extract_wikilinks(markdown: str) -> list[str]:
     return sorted(z for z in ziele if z)
 
 
+def _code_zeilenanfaenge(markdown: str) -> set[int]:
+    """Zeichenpositionen aller Zeilenanfaenge, die in einem Codeblock liegen.
+
+    Eine Zeile, die nach optionalen Leerzeichen mit ``` oder ~~~ beginnt, schaltet
+    den Zustand um; die Fence-Zeilen selbst zaehlen mit. Ein nicht geschlossener
+    Block reicht bis zum Dateiende.
+    """
+    drin: set[int] = set()
+    im_block = False
+    pos = 0
+    for zeile in markdown.splitlines(keepends=True):
+        ist_fence = zeile.lstrip(" ").startswith(("```", "~~~"))
+        if ist_fence or im_block:
+            drin.add(pos)
+        if ist_fence:
+            im_block = not im_block
+        pos += len(zeile)
+    return drin
+
+
 def chunk_markdown(
     markdown: str,
     source_path: Path,
@@ -283,7 +303,7 @@ def chunk_markdown(
     bis 6; siehe ``header_regex``).
 
     Strategie:
-    - Jeder Header eröffnet einen neuen Chunk.
+    - Jeder Header eröffnet einen neuen Chunk; ``#``-Zeilen in Codeblöcken zählen nicht.
     - Leere Chunks (nur Header, kein Inhalt) werden verworfen.
     - Chunks <= MAX_SUPER_CHUNK_CHARS Zeichen werden direkt übernommen.
     - Chunks > MAX_SUPER_CHUNK_CHARS werden mit OVERLAP_CHARS Überlappung in
@@ -299,11 +319,19 @@ def chunk_markdown(
         Liste von Chunk-Objekten (ohne Embeddings).
     """
     zaehler = zaehle or zaehle_tokens
-    matches = list(_HEADER_RE.finditer(markdown))
+    im_code = _code_zeilenanfaenge(markdown)
+    matches = [m for m in _HEADER_RE.finditer(markdown) if m.start() not in im_code]
 
     global_chunk_id = 0
 
-    first_h1 = re.search(r"^#\s+(.+)$", markdown, flags=re.MULTILINE)
+    first_h1 = next(
+        (
+            m
+            for m in re.finditer(r"^#\s+(.+)$", markdown, flags=re.MULTILINE)
+            if m.start() not in im_code
+        ),
+        None,
+    )
     document_title = first_h1.group(1).strip() if first_h1 else source_path.stem
 
     def _passt(text: str) -> bool:
