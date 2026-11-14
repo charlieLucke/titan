@@ -82,3 +82,7 @@ logs/
 # --- Jupyter ---
 .ipynb_checkpoints/
 *.ipynb_meta
+
+# --- AI tools ---
+.claude/settings.local.json
+CLAUDE.local.md

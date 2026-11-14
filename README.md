@@ -231,7 +231,7 @@ Vertiefende Architektur- und Designentscheidungen liegen in
 [`docs/ai/`](docs/ai/) (Architektur, Entscheidungs-Log, Pläne). Diese Dateien
 dienen zugleich einem strukturierten KI-gestützten Entwicklungsworkflow: ein
 Reasoning-Modell schreibt Pläne nach `docs/ai/plans/`, ein günstigeres Modell
-implementiert sie; `CLAUDE.md` (gespiegelt als `AGENTS.md`/`GEMINI.md`) ist der
+implementiert sie; `AGENTS.md` (von `CLAUDE.md` und `GEMINI.md` importiert) ist der
 Einstiegspunkt für jeden Agenten.
 
 
