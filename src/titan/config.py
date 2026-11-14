@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +38,12 @@ class TitanSettings(BaseSettings):
     # 82 %. Begruendung in docs/ai/DECISIONS.md. Nach dem Umschalten den Vault neu
     # ingestieren — die beiden Vektorarten vertragen sich nicht in einem Index.
     late_chunking: bool = False
+    # Zuschnitt der Chunks. Standardwerte = bisheriges Verhalten (H1/H2, 2800/400).
+    # Tiefe 3 schneidet zusaetzlich an "###". Nach jeder Aenderung den Vault neu
+    # einlesen — der Index enthaelt sonst Chunks aus zwei verschiedenen Zuschnitten.
+    chunk_header_tiefe: int = Field(default=2, ge=1, le=6)
+    chunk_max_zeichen: int = Field(default=2_800, ge=600)
+    chunk_overlap_zeichen: int = 400
 
     # ── Vault (Service-Ingest, POST /ingest/file) ─────────────────────────
     vault_root: Path = Path("/mnt/f/vault")
@@ -71,6 +78,16 @@ class TitanSettings(BaseSettings):
     gpu_lock_path: str = "/tmp/bge_m3.lock"  # noqa: S108
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    @model_validator(mode="after")
+    def _overlap_kleiner_als_chunk(self) -> TitanSettings:
+        """Der Overlap muss kleiner als der Chunk sein, sonst kommt das Splitten nicht voran."""
+        if not 0 <= self.chunk_overlap_zeichen < self.chunk_max_zeichen:
+            raise ValueError(
+                f"chunk_overlap_zeichen ({self.chunk_overlap_zeichen}) muss zwischen 0 und "
+                f"chunk_max_zeichen ({self.chunk_max_zeichen}) liegen (exklusiv)"
+            )
+        return self
 
 
 settings = TitanSettings()

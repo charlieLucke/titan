@@ -98,8 +98,8 @@ _WINDOW_SEP = "\n\n[SEP]\n\n"
 # 3,1 bis 3,5 Zeichen je Token. Dichteres Material (Code, Tabellen) tokenisiert
 # knapper - dafuer gibt es die harte Pruefung in make_point, die dann laut
 # scheitert, statt Qdrant einen 500 werfen zu lassen.
-MAX_SUPER_CHUNK_CHARS: int = 2_800
-OVERLAP_CHARS: int = 400
+MAX_SUPER_CHUNK_CHARS: int = settings.chunk_max_zeichen
+OVERLAP_CHARS: int = settings.chunk_overlap_zeichen
 
 # Harte Obergrenze, gegen die make_point prueft. Unter Qdrants 1024 mit Puffer
 # fuer dense und sparse im selben Punkt.
@@ -227,7 +227,24 @@ def _compute_section_id(source: str, header: str) -> str:
     return hashlib.sha256(f"{source}::{header}".encode()).hexdigest()[:16]
 
 
-_HEADER_RE = re.compile(r"^(#{1,2}\s+.+)", re.MULTILINE)
+def header_regex(tiefe: int) -> re.Pattern[str]:
+    """Muster fuer Ueberschriften der Ebenen 1 bis ``tiefe`` (Markdown-``#``).
+
+    Args:
+        tiefe: Tiefste Ebene, an der geschnitten wird (1 bis 6).
+
+    Returns:
+        Kompiliertes Muster; Gruppe 1 ist die ganze Zeile samt ``#``.
+
+    Raises:
+        ValueError: ``tiefe`` liegt ausserhalb von 1 bis 6.
+    """
+    if not 1 <= tiefe <= 6:
+        raise ValueError(f"Header-Tiefe muss 1 bis 6 sein, nicht {tiefe}")
+    return re.compile(rf"^(#{{1,{tiefe}}}\s+.+)", re.MULTILINE)
+
+
+_HEADER_RE = header_regex(settings.chunk_header_tiefe)
 
 # Obsidian-Wikilinks: [[note]] oder [[note|Anzeigetext]]. Der Vault pflegt sie
 # von Hand und vollstaendig - das ist die beste Verwandtschaftsinformation, die
@@ -255,15 +272,38 @@ def extract_wikilinks(markdown: str) -> list[str]:
     return sorted(z for z in ziele if z)
 
 
+def _code_zeilenanfaenge(markdown: str) -> set[int]:
+    """Zeichenpositionen aller Zeilenanfaenge, die in einem Codeblock liegen.
+
+    Eine Zeile, die nach optionalen Leerzeichen mit ``` oder ~~~ beginnt, schaltet
+    den Zustand um; die Fence-Zeilen selbst zaehlen mit. Ein nicht geschlossener
+    Block reicht bis zum Dateiende.
+    """
+    drin: set[int] = set()
+    im_block = False
+    pos = 0
+    for zeile in markdown.splitlines(keepends=True):
+        ist_fence = zeile.lstrip(" ").startswith(("```", "~~~"))
+        if ist_fence or im_block:
+            drin.add(pos)
+        if ist_fence:
+            im_block = not im_block
+        pos += len(zeile)
+    return drin
+
+
 def chunk_markdown(
     markdown: str,
     source_path: Path,
     zaehle: Callable[[str], int] | None = None,
 ) -> list[Chunk]:
-    """Zerschneidet Markdown-Text an Headern (h1–h2) in semantische Chunks.
+    """Zerschneidet Markdown-Text an Headern in semantische Chunks.
+
+    Geschnitten wird an Ebene 1 bis ``chunk_header_tiefe`` (Standard 2, einstellbar
+    bis 6; siehe ``header_regex``).
 
     Strategie:
-    - Jeder Header eröffnet einen neuen Chunk.
+    - Jeder Header eröffnet einen neuen Chunk; ``#``-Zeilen in Codeblöcken zählen nicht.
     - Leere Chunks (nur Header, kein Inhalt) werden verworfen.
     - Chunks <= MAX_SUPER_CHUNK_CHARS Zeichen werden direkt übernommen.
     - Chunks > MAX_SUPER_CHUNK_CHARS werden mit OVERLAP_CHARS Überlappung in
@@ -279,11 +319,19 @@ def chunk_markdown(
         Liste von Chunk-Objekten (ohne Embeddings).
     """
     zaehler = zaehle or zaehle_tokens
-    matches = list(_HEADER_RE.finditer(markdown))
+    im_code = _code_zeilenanfaenge(markdown)
+    matches = [m for m in _HEADER_RE.finditer(markdown) if m.start() not in im_code]
 
     global_chunk_id = 0
 
-    first_h1 = re.search(r"^#\s+(.+)$", markdown, flags=re.MULTILINE)
+    first_h1 = next(
+        (
+            m
+            for m in re.finditer(r"^#\s+(.+)$", markdown, flags=re.MULTILINE)
+            if m.start() not in im_code
+        ),
+        None,
+    )
     document_title = first_h1.group(1).strip() if first_h1 else source_path.stem
 
     def _passt(text: str) -> bool:
